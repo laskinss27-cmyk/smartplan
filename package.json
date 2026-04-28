@@ -29,7 +29,7 @@
       "assets/**/*"
     ],
     "win": {
-      "target": "nsis",
+      "target": ["zip", "nsis"],
       "signAndEditExecutable": false
     },
     "nsis": {
