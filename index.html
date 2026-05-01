@@ -14,14 +14,14 @@
   --ac:#4c8ef7;--ac2:#2d6ce0;--gr:#2dd87a;--am:#f0a832;--rd:#e84444;--cy:#26d4e8;
   /* Canvas colours — switched by theme */
   --cv-bg:#07090e;--cv-grid1:#111628;--cv-grid2:#181e36;--cv-axis:#222a48;
-  --cv-wall:#3a6090;--cv-wall-sel:#80b8ff;
+  --cv-wall:#3a6090;--cv-wall-sel:#80b8ff;--cv-floor:#0b0d16;
 }
 body.light-theme{
   --bg0:#f0f2f5;--bg1:#e8eaed;--bg2:#ffffff;--bg3:#f4f5f8;--bg4:#eaecf0;--bg5:#e0e3e8;
   --ln:#d0d4de;--ln2:#b8bdd0;--ln3:#9aa0b8;
   --t1:#1a1f2e;--t2:#4a5070;--t3:#8890a8;--t4:#b0b8cc;
   --cv-bg:#f8f9fb;--cv-grid1:#e0e4ec;--cv-grid2:#d0d5e0;--cv-axis:#b0b8cc;
-  --cv-wall:#2a5a90;--cv-wall-sel:#1a4a80;
+  --cv-wall:#2a5a90;--cv-wall-sel:#1a4a80;--cv-floor:#e8eaee;
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-font-smoothing:antialiased}
 html,body{height:100%;overflow:hidden;background:var(--bg0);color:var(--t1);font-family:'Segoe UI',system-ui,sans-serif;font-size:13px}
@@ -171,6 +171,10 @@ body.light-theme .eq-ic-img{filter:brightness(0) opacity(0.6)}
     <button class="tb" onclick="undo()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>Отмена<span class="k">Z</span></button>
   </div>
   <div id="tr">
+    <button class="ab" onclick="openColorSettings()" id="colors-btn" title="Цвета стен и фона">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="10.5" r="2.5"/><circle cx="8.5" cy="7.5" r="2.5"/><circle cx="6.5" cy="12.5" r="2.5"/><path d="M12 22a10 10 0 0 1 0-20c5 0 9 4 9 8a4 4 0 0 1-4 4h-2.5a1.5 1.5 0 0 0-1 2.6 1.5 1.5 0 0 1-1 2.6c-.5 0-.5 0 .5 2.8z"/></svg>
+      Цвета
+    </button>
     <button class="ab" onclick="toggleTheme()" id="theme-btn" title="Сменить тему">
       <svg id="theme-icon-dark" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
       <svg id="theme-icon-light" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
@@ -257,6 +261,21 @@ body.light-theme .eq-ic-img{filter:brightness(0) opacity(0.6)}
   </div>
 </div>
 </div>
+</div>
+
+<!-- COLOR SETTINGS MODAL -->
+<div id="ov-colors" style="position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;z-index:215;align-items:center;justify-content:center">
+  <div style="background:var(--bg2);border:1px solid var(--ln2);border-radius:11px;padding:22px;width:380px;box-shadow:0 6px 40px #000a;max-height:90vh;overflow-y:auto">
+    <h3 style="font-size:15px;color:var(--t1);margin-bottom:14px;display:flex;align-items:center;gap:8px">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--ac)" stroke-width="2"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="10.5" r="2.5"/><circle cx="8.5" cy="7.5" r="2.5"/><circle cx="6.5" cy="12.5" r="2.5"/></svg>
+      Цвета стен и окружения
+    </h3>
+    <div id="cs-rows" style="display:flex;flex-direction:column;gap:10px"></div>
+    <div style="display:flex;gap:8px;margin-top:18px">
+      <button onclick="resetColorSettings()" style="flex:1;padding:8px;background:var(--bg4);border:1px solid var(--ln2);border-radius:5px;color:var(--t2);font-size:12px;cursor:pointer">Сбросить</button>
+      <button onclick="closeColorSettings()" style="flex:1;padding:8px;background:var(--ac);border:none;border-radius:5px;color:#fff;font-size:12px;font-weight:600;cursor:pointer">Готово</button>
+    </div>
+  </div>
 </div>
 
 <!-- COMMENT DIALOG -->
@@ -348,6 +367,11 @@ function getVar(name,fallback=''){
     const v=(getComputedStyle(document.documentElement).getPropertyValue(name)||'').trim();
     return v||fallback;
   }catch(e){return fallback;}
+}
+function _hex2int(h,fb){
+  const s=(h||'').trim().replace(/^#/,'');
+  if(/^[0-9a-f]{6}$/i.test(s))return parseInt(s,16);
+  return fb;
 }
 // ═══════════════════════════════════════════════════════════
 // STATE
@@ -984,7 +1008,7 @@ function initThree(){
   if(!G.R){
     const r=new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:true});
     r.setSize(W,H);r.setPixelRatio(Math.min(window.devicePixelRatio,2));
-    r.setClearColor(G._lightTheme?0xf0f2f5:0x07090e);r.shadowMap.enabled=true;r.shadowMap.type=THREE.PCFSoftShadowMap;
+    r.setClearColor(getVar('--cv-bg',G._lightTheme?'#f0f2f5':'#07090e'));r.shadowMap.enabled=true;r.shadowMap.type=THREE.PCFSoftShadowMap;
     wrap.appendChild(r.domElement);G.R=r;
     G.CAM=new THREE.PerspectiveCamera(60,W/H,.5,20000);
     G.SC=new THREE.Scene();
@@ -1015,7 +1039,8 @@ function buildScene3(){
   const fl2=new THREE.PointLight(0x4c8ef7,.3,3000);fl2.position.set(-400,500,300);sc.add(fl2);
 
   // Floor
-  const fl=new THREE.Mesh(new THREE.PlaneGeometry(6000,6000),new THREE.MeshLambertMaterial({color:G._lightTheme?0xe8eaee:0x0b0d16}));
+  const flCol=_hex2int(getVar('--cv-floor'), G._lightTheme?0xe8eaee:0x0b0d16);
+  const fl=new THREE.Mesh(new THREE.PlaneGeometry(6000,6000),new THREE.MeshLambertMaterial({color:flCol}));
   fl.rotation.x=-Math.PI/2;fl.receiveShadow=true;fl.name='floor';sc.add(fl);
   // Grid matches 2D: 1m = 1/G.sc units, show grid at 1m intervals
   const gridC1=G._lightTheme?0xc8ccd8:0x161828,gridC2=G._lightTheme?0xd8dce8:0x0f1120;
@@ -1143,7 +1168,8 @@ function buildScene3(){
 
 function addWMesh(sc,wlen,wh,th,ang,mx,my,mz){
   const geo=new THREE.BoxGeometry(wlen,wh,th);
-  const mat=new THREE.MeshLambertMaterial({color:0x1e2a42});
+  const wallCol=_hex2int(getVar('--cv-wall'), G._lightTheme?0x2a5a90:0x1e2a42);
+  const mat=new THREE.MeshLambertMaterial({color:wallCol});
   const mesh=new THREE.Mesh(geo,mat);
   mesh.position.set(mx,my,mz);mesh.rotation.y=-ang;mesh.castShadow=true;mesh.receiveShadow=true;mesh.name='wall';sc.add(mesh);
   const el=new THREE.LineSegments(new THREE.EdgesGeometry(geo),new THREE.LineBasicMaterial({color:0x3a5080,transparent:true,opacity:.6}));
@@ -2298,29 +2324,45 @@ function loadAeqSvg(inp){
   const reader=new FileReader();
   reader.onerror=function(){alert('Ошибка чтения файла');};
   reader.onload=function(ev){
-    const dataUrl=ev.target.result;
-    const prev=document.getElementById('aeq-preview');
-    // Проверяем что картинка корректно грузится перед сохранением
-    const testImg=new Image();
-    testImg.onload=function(){
-      _aeqSvg=dataUrl;
-      prev.innerHTML='<img src="'+dataUrl+'" style="width:48px;height:48px;object-fit:contain;border:1px solid var(--ln2);border-radius:6px;padding:4px;background:var(--bg3)">';
-      prev.style.display='block';
-      document.getElementById('aeq-drop').style.display='none';
-    };
-    testImg.onerror=function(){
-      // Fallback: попробуем как inline SVG
+    let svgText=String(ev.target.result||'');
+    // Гарантируем xmlns — без него <img> отказывается рендерить SVG
+    if(!/xmlns\s*=/i.test(svgText)){
+      svgText=svgText.replace(/<svg\b/i,'<svg xmlns="http://www.w3.org/2000/svg"');
+    }
+    // Грузим SVG в Image и растеризуем в PNG — PNG dataURL грузится всегда
+    const blob=new Blob([svgText],{type:'image/svg+xml'});
+    const url=URL.createObjectURL(blob);
+    const img=new Image();
+    img.onload=function(){
       try{
-        const svgText=atob(dataUrl.split(',')[1]||'');
-        _aeqSvg=dataUrl;
-        prev.innerHTML='<div style="width:48px;height:48px;display:flex;align-items:center;justify-content:center;border:1px solid var(--ln2);border-radius:6px;background:var(--bg3);overflow:hidden;font-size:9px;color:var(--ac)">SVG OK</div>';
+        const S=256;
+        const c=document.createElement('canvas');c.width=S;c.height=S;
+        const ctx=c.getContext('2d');
+        // Вписываем SVG с сохранением пропорций
+        const iw=img.naturalWidth||img.width||S;
+        const ih=img.naturalHeight||img.height||S;
+        const k=Math.min(S/iw,S/ih);
+        const dw=iw*k, dh=ih*k;
+        ctx.drawImage(img,(S-dw)/2,(S-dh)/2,dw,dh);
+        const pngUrl=c.toDataURL('image/png');
+        URL.revokeObjectURL(url);
+        _aeqSvg=pngUrl;
+        const prev=document.getElementById('aeq-preview');
+        prev.innerHTML='<img src="'+pngUrl+'" style="width:48px;height:48px;object-fit:contain;border:1px solid var(--ln2);border-radius:6px;padding:4px;background:var(--bg3)">';
         prev.style.display='block';
         document.getElementById('aeq-drop').style.display='none';
-      }catch(e){alert('Не удалось загрузить SVG. Проверьте файл.');}
+      }catch(e){
+        URL.revokeObjectURL(url);
+        alert('Не удалось обработать SVG: '+e.message);
+      }
     };
-    testImg.src=dataUrl;
+    img.onerror=function(){
+      URL.revokeObjectURL(url);
+      alert('SVG невалидный или содержит неподдерживаемые элементы (внешние ссылки, скрипты).');
+    };
+    img.src=url;
   };
-  reader.readAsDataURL(file);
+  reader.readAsText(file);
   inp.value='';
 }
 
@@ -2358,13 +2400,20 @@ function renderCustomEqPanel(){
     const iconHtml=ceq.svgData
       ?'<img src="'+ceq.svgData+'" style="width:24px;height:24px;object-fit:contain">'
       :'<svg width="24" height="24" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3" fill="#1a2a4a" stroke="#4c8ef7" stroke-width="1.2"/><text x="12" y="16" text-anchor="middle" fill="#4c8ef7" font-size="10" font-family="Arial">'+abbr+'</text></svg>';
-    const behaviorLabel=ceq.behavior==='camera'?' 📷':ceq.behavior==='light'?' 💡':'';
     const subHtml=(ceq.sub?'<div class="ei-s">'+ceq.sub+'</div>':'')+
       (ceq.behavior&&ceq.behavior!=='normal'?'<div class="ei-s" style="color:var(--ac);font-size:9px">'+
       (ceq.behavior==='camera'?'с конусом обзора':'потолок/стена')+'</div>':'');
-    return '<div class="ei" draggable="true" data-eq="'+ceq.type+'" id="cei_'+ceq.type+'">'
+    const safeType=ceq.type.replace(/'/g,"\\'");
+    const safeName=(ceq.name||'').replace(/'/g,"\\'").replace(/</g,'&lt;');
+    return '<div class="ei" draggable="true" data-eq="'+ceq.type+'" id="cei_'+ceq.type+'" style="position:relative">'
       +'<div class="ei-ic">'+iconHtml+'</div>'
-      +'<div style="flex:1;min-width:0"><div class="ei-n" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+ceq.name+'</div>'+subHtml+'</div>'
+      +'<div style="flex:1;min-width:0"><div class="ei-n" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+safeName+'</div>'+subHtml+'</div>'
+      +'<button class="ceq-del" title="Удалить из библиотеки" '
+      +'onmousedown="event.stopPropagation()" '
+      +'onclick="event.stopPropagation();deleteCustomEq(\''+safeType+'\')" '
+      +'style="background:transparent;border:1px solid var(--ln2);color:var(--t3);width:18px;height:18px;border-radius:4px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:11px;line-height:1;padding:0;flex-shrink:0" '
+      +'onmouseover="this.style.background=\'var(--rd)\';this.style.color=\'#fff\';this.style.borderColor=\'var(--rd)\'" '
+      +'onmouseout="this.style.background=\'transparent\';this.style.color=\'var(--t3)\';this.style.borderColor=\'var(--ln2)\'">×</button>'
       +'</div>';
   }).join('');
   list.querySelectorAll('.ei[data-eq]').forEach(el=>{
@@ -2372,6 +2421,44 @@ function renderCustomEqPanel(){
     el._ds=e=>e.dataTransfer.setData('text/plain',el.dataset.eq);
     el.addEventListener('dragstart',el._ds);
   });
+}
+
+function deleteCustomEq(type){
+  const idx=G.customEq.findIndex(c=>c.type===type);
+  if(idx<0)return;
+  const ceq=G.customEq[idx];
+  // Считаем размещённые экземпляры
+  const placed=G.equip.filter(e=>e.type===type).length;
+  const msg=placed>0
+    ? 'Удалить «'+ceq.name+'» из библиотеки?\nНа плане размещено: '+placed+' шт. Они тоже будут удалены.'
+    : 'Удалить «'+ceq.name+'» из библиотеки?';
+  if(!confirm(msg))return;
+  savH();
+  // Удаляем размещённые экземпляры
+  G.equip=G.equip.filter(e=>e.type!==type);
+  // Удаляем привязанные кабели (если кабель шёл к удаляемому объекту)
+  if(Array.isArray(G.cables)){
+    G.cables=G.cables.filter(cab=>{
+      if(!cab||!cab.fromEq||!cab.toEq)return true;
+      // У кабелей нет ссылки на eq.type — они хранят координаты, поэтому ничего не делаем
+      return true;
+    });
+  }
+  // Удаляем из словарей и кэшей
+  G.customEq.splice(idx,1);
+  delete EQ_NAMES[type];
+  delete EQ_MOUNT[type];
+  delete EQ_COL3[type];
+  delete EQ_COL2[type];
+  clearSvgCache(type);
+  // Сбрасываем выбор если удалённый элемент выбран
+  if(G.sel&&G.sel.t==='eq'){
+    const eq=G.equip[G.sel.i]; if(!eq) G.sel=null;
+  }
+  renderCustomEqPanel();
+  try{localStorage.setItem(LS_EQ_KEY,JSON.stringify(G.customEq));}catch(e){}
+  refresh3d();
+  closeP();
 }
 
 // Кастомные типы в 3D — рисуем как спрайт из SVG или как цветной бокс
@@ -2541,9 +2628,11 @@ function toggleTheme(){
   document.getElementById('theme-icon-dark').style.display=G._lightTheme?'none':'block';
   document.getElementById('theme-icon-light').style.display=G._lightTheme?'block':'none';
   document.getElementById('theme-label').textContent=G._lightTheme?'Тёмный':'Светлый';
+  // Применяем пользовательские цвета для новой темы (или сбрасываем к её дефолтам)
+  if(typeof loadColorSettings==='function')loadColorSettings();
   // Обновляем 3D фон
   if(G.R){
-    G.R.setClearColor(G._lightTheme?0xf0f2f5:0x07090e);
+    G.R.setClearColor(getVar('--cv-bg',G._lightTheme?'#f0f2f5':'#07090e'));
     buildScene3();
   }
   rd();
@@ -2577,7 +2666,90 @@ function closeComment(){
 
 setTool('wall');rsz();rd();bindDragItems();preloadSvg3d();
 // Восстанавливаем тему
+// ─── Пользовательские цвета стен и окружения ────────────────
+const COLOR_KEY='smartplan_colors_v1';
+const COLOR_VARS={
+  dark:{
+    '--cv-wall':     {label:'Стены',          def:'#3a6090'},
+    '--cv-wall-sel': {label:'Выделенная стена',def:'#80b8ff'},
+    '--cv-bg':       {label:'Фон холста',     def:'#07090e'},
+    '--cv-grid1':    {label:'Сетка тонкая',   def:'#111628'},
+    '--cv-grid2':    {label:'Сетка крупная',  def:'#181e36'},
+    '--cv-axis':     {label:'Оси координат',  def:'#222a48'},
+    '--cv-floor':    {label:'Пол (3D)',       def:'#0b0d16'}
+  },
+  light:{
+    '--cv-wall':     {label:'Стены',          def:'#2a5a90'},
+    '--cv-wall-sel': {label:'Выделенная стена',def:'#1a4a80'},
+    '--cv-bg':       {label:'Фон холста',     def:'#f8f9fb'},
+    '--cv-grid1':    {label:'Сетка тонкая',   def:'#e0e4ec'},
+    '--cv-grid2':    {label:'Сетка крупная',  def:'#d0d5e0'},
+    '--cv-axis':     {label:'Оси координат',  def:'#b0b8cc'},
+    '--cv-floor':    {label:'Пол (3D)',       def:'#e8eaee'}
+  }
+};
+function _colorTheme(){return G._lightTheme?'light':'dark';}
+function loadColorSettings(){
+  let stored={};
+  try{stored=JSON.parse(localStorage.getItem(COLOR_KEY)||'{}')||{};}catch(e){stored={};}
+  const theme=_colorTheme();
+  const map=stored[theme]||{};
+  Object.keys(COLOR_VARS[theme]).forEach(v=>{
+    if(map[v]) document.documentElement.style.setProperty(v,map[v]);
+    else document.documentElement.style.removeProperty(v);
+  });
+  return stored;
+}
+function saveColorSetting(varName,value){
+  let stored={};
+  try{stored=JSON.parse(localStorage.getItem(COLOR_KEY)||'{}')||{};}catch(e){stored={};}
+  const theme=_colorTheme();
+  if(!stored[theme])stored[theme]={};
+  if(value)stored[theme][varName]=value; else delete stored[theme][varName];
+  try{localStorage.setItem(COLOR_KEY,JSON.stringify(stored));}catch(e){}
+  if(value)document.documentElement.style.setProperty(varName,value);
+  else document.documentElement.style.removeProperty(varName);
+  rd();
+  if(G.mode==='3d'&&G.R){
+    G.R.setClearColor(getVar('--cv-bg',G._lightTheme?'#f0f2f5':'#07090e'));
+    buildScene3();
+  }
+}
+function openColorSettings(){
+  const theme=_colorTheme();
+  const stored=loadColorSettings();
+  const map=stored[theme]||{};
+  const rows=document.getElementById('cs-rows');
+  rows.innerHTML=Object.keys(COLOR_VARS[theme]).map(v=>{
+    const cfg=COLOR_VARS[theme][v];
+    const cur=map[v]||cfg.def;
+    return '<div style="display:flex;align-items:center;gap:10px">'
+      +'<input type="color" value="'+cur+'" oninput="saveColorSetting(\''+v+'\',this.value)" style="width:38px;height:30px;border:1px solid var(--ln2);border-radius:5px;background:transparent;cursor:pointer;padding:0">'
+      +'<div style="flex:1"><div style="font-size:12px;color:var(--t1)">'+cfg.label+'</div>'
+      +'<div style="font-size:10px;color:var(--t3);font-family:monospace">'+v+'</div></div>'
+      +'<button title="Сбросить к значению по умолчанию" onclick="this.previousElementSibling.previousElementSibling.value=\''+cfg.def+'\';saveColorSetting(\''+v+'\',null);openColorSettings()" style="background:transparent;border:1px solid var(--ln2);color:var(--t3);width:26px;height:26px;border-radius:4px;cursor:pointer;font-size:11px;padding:0">↺</button>'
+      +'</div>';
+  }).join('');
+  document.getElementById('ov-colors').style.display='flex';
+}
+function closeColorSettings(){document.getElementById('ov-colors').style.display='none';}
+function resetColorSettings(){
+  if(!confirm('Сбросить цвета '+(_colorTheme()==='light'?'светлой':'тёмной')+' темы к значениям по умолчанию?'))return;
+  let stored={};
+  try{stored=JSON.parse(localStorage.getItem(COLOR_KEY)||'{}')||{};}catch(e){stored={};}
+  delete stored[_colorTheme()];
+  try{localStorage.setItem(COLOR_KEY,JSON.stringify(stored));}catch(e){}
+  loadColorSettings();
+  rd();
+  if(G.mode==='3d'&&G.R){
+    G.R.setClearColor(getVar('--cv-bg',G._lightTheme?'#f0f2f5':'#07090e'));
+    buildScene3();
+  }
+  openColorSettings();
+}
+
 try{if(localStorage.getItem('smartplan_theme')==='light')toggleTheme();}catch(e){}
+loadColorSettings();
 autoLoad();
 
 // Финальное сохранение при закрытии/перезагрузке страницы
