@@ -1,6 +1,6 @@
 {
   "name": "smartplan",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "description": "Инструмент проектирования систем умного дома и видеонаблюдения",
   "main": "main.js",
   "author": "NEXUS / Холдинг Дом",

@@ -300,8 +300,8 @@ body.light-theme .eq-ic-img{filter:brightness(0) opacity(0.6)}
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--ac)" stroke-width="2"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
       Новое оборудование
     </h3>
-    <div class="mf"><label>Название</label><input id="aeq-name" placeholder="Например: Датчик движения"></div>
-    <div class="mf"><label>Подпись (необязательно)</label><input id="aeq-sub" placeholder="Тип, модель..."></div>
+    <div class="mf"><label>Название</label><input id="aeq-name" type="text" placeholder="Например: Датчик движения" onkeydown="event.stopPropagation()"></div>
+    <div class="mf"><label>Подпись (необязательно)</label><input id="aeq-sub" type="text" placeholder="Тип, модель..." onkeydown="event.stopPropagation()"></div>
     <div class="mf">
       <label>Поведение объекта</label>
       <select id="aeq-behavior" style="width:100%;padding:7px 10px;border-radius:5px;border:1px solid var(--ln2);background:var(--bg3);color:var(--t1);font-size:12px;outline:none;margin-top:4px">
@@ -933,10 +933,11 @@ function showP(t,i){
     pt.innerHTML=`<svg width="12" height="12" viewBox="0 0 12 12"><circle cx="6" cy="6" r="5.5" fill="${col}" opacity=".18"/><circle cx="6" cy="6" r="2.8" fill="${col}"/></svg>${EQ_NAMES[eq.type]}`;
     const defH3=eq.type==='socket'?0.4:eq.type==='heat'?0.6:1.5;
     const curH3m=eq.h3!=null?(eq.h3*G.sc).toFixed(2):defH3.toFixed(2);
-    let h=`<div class="pr"><div class="plb2">Название</div><input class="pi" value="${eq.name||''}" oninput="upEq('name',this.value)"></div>
-    <div class="pr"><div class="plb2">Модель</div><input class="pi" placeholder="Например: DS-2CD2143G2" value="${eq.model||''}" oninput="upEq('model',this.value);refresh3d()"></div>
-    <div class="pr"><div class="plb2">Высота (м)</div><input class="pi" type="number" step="0.1" min="0.1" max="100" value="${curH3m}" oninput="upEq('h3',+this.value/G.sc);refresh3d()"></div>
-    <div class="pr"><div class="plb2">Поворот °</div><input class="pi" type="number" min="-180" max="180" value="${eq.ang||0}" oninput="upEq('ang',+this.value);refresh3d()"></div>`;
+    const escAttr=v=>String(v||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+    let h=`<div class="pr"><div class="plb2">Название</div><input class="pi" type="text" value="${escAttr(eq.name)}" oninput="upEq('name',this.value)" onkeydown="event.stopPropagation()"></div>
+    <div class="pr"><div class="plb2">Модель</div><input class="pi" type="text" placeholder="Например: DS-2CD2143G2" value="${escAttr(eq.model)}" oninput="upEq('model',this.value);refresh3d()" onkeydown="event.stopPropagation()"></div>
+    <div class="pr"><div class="plb2">Высота (м)</div><input class="pi" type="number" step="0.1" min="0.1" max="100" value="${curH3m}" oninput="upEq('h3',+this.value/G.sc);refresh3d()" onkeydown="event.stopPropagation()"></div>
+    <div class="pr"><div class="plb2">Поворот °</div><input class="pi" type="number" min="-180" max="180" value="${eq.ang||0}" oninput="upEq('ang',+this.value);refresh3d()" onkeydown="event.stopPropagation()"></div>`;
     const _isCamP=eq.type==='camera'||(G.customEq.find(c=>c.type===eq.type)?.behavior==='camera');
     if(_isCamP){h+=`
     <div class="pr"><div class="plb2">Угол обзора</div><input class="pi" type="range" min="10" max="180" value="${eq.fovA||60}" oninput="upEq('fovA',+this.value);document.getElementById('pfv').textContent=this.value+'°';refresh3d()"><div class="pv" id="pfv">${eq.fovA||60}°</div></div>
@@ -1008,7 +1009,7 @@ function initThree(){
   if(!G.R){
     const r=new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:true});
     r.setSize(W,H);r.setPixelRatio(Math.min(window.devicePixelRatio,2));
-    r.setClearColor(getVar('--cv-bg',G._lightTheme?'#f0f2f5':'#07090e'));r.shadowMap.enabled=true;r.shadowMap.type=THREE.PCFSoftShadowMap;
+    r.setClearColor(getVar('--cv-bg',G._lightTheme?'#f0f2f5':'#07090e'));r.shadowMap.enabled=true;r.shadowMap.type=THREE.PCFSoftShadowMap;r.localClippingEnabled=true;
     wrap.appendChild(r.domElement);G.R=r;
     G.CAM=new THREE.PerspectiveCamera(60,W/H,.5,20000);
     G.SC=new THREE.Scene();
@@ -1370,30 +1371,47 @@ function placeEq3(sc,eq){
     sc.add(_hb);
   }
 
-  // Camera cone — наследует rotation меша, смотрит туда же куда и камера
+  // Camera cone — wall-clipped via raycasting
   if(_isCam3&&eq.fovOn!==false){
     const fa=(eq.fovA||60)*Math.PI/180,fd=eq.fovD||120;
-    const cg=new THREE.ConeGeometry(Math.tan(fa/2)*fd,fd,28,1,true);
-    const cm=new THREE.MeshBasicMaterial({color:0x4c8ef7,transparent:true,opacity:.08,side:THREE.DoubleSide});
-    const cone=new THREE.Mesh(cg,cm);
-    const ce=new THREE.LineSegments(new THREE.EdgesGeometry(cg),
-      new THREE.LineBasicMaterial({color:0x4c8ef7,transparent:true,opacity:.38}));
+    const SEGS=56;
+    const halfA=fa/2, tanA=Math.tan(halfA);
+    const maxDist=fd/Math.cos(halfA);
+    const _floorClip=[new THREE.Plane(new THREE.Vector3(0,1,0),0)];
 
-    // Конус в группе которая повёрнута как меш камеры.
-    // Конус по умолч. вытянут вдоль +Y. Хотим чтобы смотрел вдоль -Z меша (наружу от стены).
-    // Поворачиваем конус внутри группы: -Z = rotation.x = +PI/2
-    cone.rotation.x = Math.PI/2;        // +Y → -Z в локальном пространстве группы
-    cone.position.set(0, 0, -fd/2);     // центр конуса на fd/2 перед камерой
+    const wallMeshes=sc.children.filter(c=>c.name==='wall'&&c.isMesh);
+    wallMeshes.forEach(w=>w.updateMatrixWorld(true));
+    const camQuat=new THREE.Quaternion().setFromEuler(mesh.rotation);
+    const rc=new THREE.Raycaster();
 
-    ce.rotation.copy(cone.rotation);
-    ce.position.copy(cone.position);
+    const verts=[0,0,0];
+    const idx=[];
+    for(let i=0;i<=SEGS;i++){
+      const theta=(i%SEGS)*Math.PI*2/SEGS;
+      const lx=tanA*Math.cos(theta),ly=tanA*Math.sin(theta),lz=-1;
+      const len=Math.sqrt(lx*lx+ly*ly+1);
+      const nx=lx/len,ny=ly/len,nz=lz/len;
+      const dirW=new THREE.Vector3(nx,ny,nz).applyQuaternion(camQuat);
+      rc.set(mesh.position,dirW);rc.far=maxDist;
+      const hits=rc.intersectObjects(wallMeshes);
+      const d=hits.length>0?Math.min(maxDist,hits[0].distance):maxDist;
+      verts.push(d*nx,d*ny,d*nz);
+    }
+    for(let i=0;i<SEGS;i++) idx.push(0,i+1,i+2);
+
+    const geo=new THREE.BufferGeometry();
+    geo.setAttribute('position',new THREE.Float32BufferAttribute(verts,3));
+    geo.setIndex(idx);geo.computeVertexNormals();
+
+    const cm=new THREE.MeshBasicMaterial({color:0x4c8ef7,transparent:true,opacity:.08,side:THREE.DoubleSide,clippingPlanes:_floorClip});
+    const cone=new THREE.Mesh(geo,cm);
+    const ce=new THREE.LineSegments(new THREE.EdgesGeometry(geo,15),
+      new THREE.LineBasicMaterial({color:0x4c8ef7,transparent:true,opacity:.38,clippingPlanes:_floorClip}));
 
     const coneGroup=new THREE.Group();
     coneGroup.position.copy(mesh.position);
-    coneGroup.rotation.copy(mesh.rotation); // та же ориентация что и меш камеры
-    coneGroup.add(cone);
-    coneGroup.add(ce);
-    sc.add(coneGroup);
+    coneGroup.rotation.copy(mesh.rotation);
+    coneGroup.add(cone);coneGroup.add(ce);sc.add(coneGroup);
   }
 }
 
