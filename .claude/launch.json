@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "smartplan",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["http-server", "-p", "5180", "-c-1", "--cors"],
+      "port": 5180
+    }
+  ]
+}

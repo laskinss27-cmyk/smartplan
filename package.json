@@ -1,0 +1,59 @@
+{
+  "name": "smartplan",
+  "version": "3.4.0",
+  "description": "Инструмент проектирования систем умного дома и видеонаблюдения",
+  "main": "main.js",
+  "author": "laskinss27-cmyk",
+  "license": "Apache-2.0",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "test": "node --test test/*.test.js",
+    "check": "node --check main.js && node --check preload.js && node --check project-core.js && node --check renderer/state.js && node --check renderer/plan-2d.js && node --check renderer/scene-3d.js && node --check renderer/actions.js && node --check renderer/pdf.js && node --check renderer/project.js && node --check scripts/build-web.js && npm test",
+    "build-web": "node scripts/build-web.js",
+    "build-win": "electron-builder --win --x64",
+    "build-mac": "electron-builder --mac",
+    "build-linux": "electron-builder --linux"
+  },
+  "devDependencies": {
+    "electron": "39.8.6",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "com.nexus.smartplan",
+    "productName": "SmartPlan",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "project-core.js",
+      "renderer/**/*.js",
+      "styles.css",
+      "index.html",
+      "assets/**/*"
+    ],
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "zip",  "arch": ["x64"] }
+      ],
+      "signAndEditExecutable": false,
+      "artifactName": "SmartPlan-${version}-win.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerLanguages": ["ru_RU", "en_US"],
+      "language": "1049"
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.productivity"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
+  }
+}
