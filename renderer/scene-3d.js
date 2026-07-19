@@ -708,6 +708,7 @@ function setup3dEv(el){
         .filter(h=>h.object.isMesh&&h.object.name.startsWith('eq_hnd_'));
       if(hndHits.length){
         resizeCorner=hndHits[0].object.name.replace('eq_hnd_','');
+        beginProjectChange('resize-equipment');
         const _rm=G.SC.children.find(c=>c.name==='eq_'+G.selEqId3);
         if(_rm){
           _rm.updateWorldMatrix(true,false);
@@ -770,7 +771,7 @@ function setup3dEv(el){
       // Intersect ray with drag plane
       if(RAY.ray.intersectPlane(mvPlane,target)){
         const eq=G.equip[mvIdx];
-        if(!mvStarted){savH();Core.detachEquipmentFromWall(eq);mvStarted=true;}
+        if(!mvStarted){beginProjectChange('move-equipment-3d');Core.detachEquipmentFromWall(eq);mvStarted=true;}
         const mount=EQ_MOUNT[eq.type]||'wall';
         if(mount==='ceiling'){
           Core.detachEquipmentFromWall(eq);
@@ -853,8 +854,8 @@ function setup3dEv(el){
       if(!rmbDragged&&G.tool3!=='nav')set3T('nav');
       rmbDragged=false;
     }
-    if(e.button===0&&resizeCorner){resizeCorner=null;savH();return;}
-    if(e.button===0&&mvIdx>=0){if(mvStarted)scheduleAutoSave();mvIdx=-1;mvStarted=false;el.style.cursor='default';}
+    if(e.button===0&&resizeCorner){resizeCorner=null;commitProjectChange('resize-equipment');return;}
+    if(e.button===0&&mvIdx>=0){if(mvStarted)commitProjectChange('move-equipment-3d');mvIdx=-1;mvStarted=false;el.style.cursor='default';}
   });
 
   el.addEventListener('dblclick',()=>{if(!document.pointerLockElement)el.requestPointerLock();});
@@ -925,7 +926,7 @@ function setup3dEv(el){
       }
       // остальные случаи (пол, slab снизу и т.д.) — eqFloor=G.floor, h3val=null
     }
-    savH();
+    beginProjectChange('add-equipment-3d');
     const ceqDef=G.customEq.find(c=>c.type===type);
     const newEq={id:G.nextId++,type,x:wx,y:wy,
       name:EQ_NAMES[type]||type,model:'',ang:0,floor:eqFloor,
@@ -936,6 +937,7 @@ function setup3dEv(el){
       if(wall){newEq.floor=wall.floor||1;Core.attachEquipmentToWall(newEq,wall);}
     }
     G.equip.push(newEq);
+    commitProjectChange('add-equipment-3d');
     refresh3d();
   });
 
@@ -1010,12 +1012,13 @@ function finishCable(){
   if(!G.cableType||G.cablePts.length<2){
     G.cablePts=[];G.cableStepSizes=[];buildScene3();updateCableUI();return;
   }
-  savH();
+  beginProjectChange('finish-cable');
   G.cables.push({
     type:G.cableType,
     pts:[...G.cablePts],
     name:`${CABLE_LAB[G.cableType]} ${G.cables.filter(c=>c.type===G.cableType).length+1}`
   });
+  commitProjectChange('finish-cable');
   G.cablePts=[];G.cableStepSizes=[];
   // Оставляем G.cableType — можно сразу прокладывать следующий того же типа
   buildScene3();updateCableUI();

@@ -20,6 +20,66 @@ test('2D geometry measures segments and resizes them without changing direction'
   });
 });
 
+test('snapshot history groups transactions and restores undo and redo states', () => {
+  let state = { value: 0 };
+  const events = [];
+  const history = Core.createSnapshotHistory(
+    () => JSON.stringify(state),
+    (snapshot) => { state = JSON.parse(snapshot); },
+    { limit: 3, onChange: (event) => events.push(event) }
+  );
+
+  history.begin('drag');
+  state.value = 1;
+  state.value = 2;
+  assert.equal(history.commit(), true);
+  assert.equal(history.undoStack.length, 1);
+  assert.equal(history.undo(), true);
+  assert.equal(state.value, 0);
+  assert.equal(history.redo(), true);
+  assert.equal(state.value, 2);
+
+  history.begin('noop');
+  assert.equal(history.commit(), false);
+  assert.deepEqual(events, ['commit', 'undo', 'redo']);
+});
+
+test('snapshot history commits a previous transaction before a different action', () => {
+  let value = 0;
+  const history = Core.createSnapshotHistory(
+    () => String(value),
+    (snapshot) => { value = Number(snapshot); }
+  );
+
+  history.begin('slider');
+  value = 3;
+  assert.equal(history.commit('delayed-other-action'), false);
+  history.begin('draw');
+  value = 4;
+  history.commit();
+  assert.equal(history.undo(), true);
+  assert.equal(value, 3);
+  assert.equal(history.undo(), true);
+  assert.equal(value, 0);
+});
+
+test('snapshot history rolls back failed changes and clears redo after a new edit', () => {
+  let value = 0;
+  const history = Core.createSnapshotHistory(
+    () => String(value),
+    (snapshot) => { value = Number(snapshot); }
+  );
+
+  assert.throws(() => history.run('broken', () => { value = 9; throw new Error('stop'); }), /stop/);
+  assert.equal(value, 0);
+  assert.equal(history.undoStack.length, 0);
+  history.run('first', () => { value = 1; });
+  history.undo();
+  assert.equal(history.redoStack.length, 1);
+  history.run('replacement', () => { value = 2; });
+  assert.equal(history.redoStack.length, 0);
+});
+
 test('detaching a shared wall endpoint preserves the neighbouring wall', () => {
   const project = {
     nextVid: 4,

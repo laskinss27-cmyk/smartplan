@@ -71,74 +71,62 @@ function historySnapshot(){
   return JSON.stringify({
     verts:G.verts,walls:G.walls,doors:G.doors,windows:G.windows,equip:G.equip,
     measures:G.measures,cables:G.cables,comments:G.comments,customEq:G.customEq,
-    sc:G.sc,gs:G.gs,floor:G.floor,floors:G.floors,nextId:G.nextId,nextVid:G.nextVid,nextWallId:G.nextWallId
+    sc:G.sc,gs:G.gs,nextId:G.nextId,nextVid:G.nextVid,nextWallId:G.nextWallId
   });
-}
-function pushHistorySnapshot(snapshot){
-  if(!snapshot)return;
-  if(G.hist[G.hist.length-1]!==snapshot)G.hist.push(snapshot);
-  if(G.hist.length>60)G.hist.shift();
-  G.future=[];
 }
 function restoreHistorySnapshot(snapshot){
   const s=JSON.parse(snapshot);
   G.verts=s.verts||[];G.walls=s.walls||[];G.doors=s.doors||[];G.windows=s.windows||[];
   G.equip=s.equip||[];G.measures=s.measures||[];G.cables=s.cables||[];G.comments=s.comments||[];
   G.customEq=s.customEq||[];G.sc=Core.normalizeScale(s.sc,G.sc);G.gs=Number.isFinite(s.gs)?s.gs:G.gs;
-  G.floor=s.floor||1;G.floors=s.floors||1;G.nextId=s.nextId||1;G.nextVid=s.nextVid||1;G.nextWallId=s.nextWallId||1;
+  G.nextId=s.nextId||1;G.nextVid=s.nextVid||1;G.nextWallId=s.nextWallId||1;
+  G.floors=Math.max(1,...G.walls.map(w=>w.floor||1),...G.equip.map(e=>e.floor||1));
+  G.floor=Math.min(G.floor||1,G.floors);
+  G.dragEq2d=null;G.selEqId3=-1;G.cablePts=[];G.cableStepSizes=[];
+  if(typeof VD!=='undefined'){VD.mode=null;VD.vid=null;VD.wIdx=null;VD.started=false;}
   syncProjectControls();registerCustomEqDefinitions();renderCustomEqPanel();migrateWalls();
   G.sel=null;G.drawOn=false;G.drawS=null;G.drawC=null;G._dragging=false;closeP();
   if(G.mode==='2d')rd();else buildScene3();
-  updateCableUI();scheduleAutoSave();
-}
-function savH(){
-  pushHistorySnapshot(historySnapshot());
-  scheduleAutoSave();
+  updateCableUI();
 }
 function scheduleAutoSave(){
   clearTimeout(_autoSaveTimer);
   _autoSaveTimer=setTimeout(()=>{autoSave();showSaveBadge();},800);
 }
-function undo(){
-  if(!G.hist.length)return;
-  const previous=G.hist.pop();
-  G.future.push(historySnapshot());
-  if(G.future.length>60)G.future.shift();
-  restoreHistorySnapshot(previous);
-}
-function redo(){
-  if(!G.future.length)return;
-  const next=G.future.pop();
-  const current=historySnapshot();
-  if(G.hist[G.hist.length-1]!==current)G.hist.push(current);
-  if(G.hist.length>60)G.hist.shift();
-  restoreHistorySnapshot(next);
-}
+const projectHistory=Core.createSnapshotHistory(historySnapshot,restoreHistorySnapshot,{
+  limit:60,
+  undoStack:G.hist,
+  redoStack:G.future,
+  onChange:event=>{if(event!=='rollback')scheduleAutoSave();}
+});
+function beginProjectChange(label){return projectHistory.begin(label);}
+function commitProjectChange(label){return projectHistory.commit(label);}
+function cancelProjectChange(){return projectHistory.cancel();}
+function runProjectChange(label,mutator){return projectHistory.run(label,mutator);}
+function resetProjectHistory(){projectHistory.reset();}
+function undo(){projectHistory.undo();}
+function redo(){projectHistory.redo();}
 
-let _propertyEditBefore=null;
 const _propertyPanelBody=document.getElementById('pb');
 _propertyPanelBody.addEventListener('focusin',e=>{
-  if(e.target.matches('input,select,textarea')&&_propertyEditBefore===null)_propertyEditBefore=historySnapshot();
+  if(e.target.matches('input,select,textarea'))beginProjectChange('property');
 });
 _propertyPanelBody.addEventListener('input',e=>{
   if(e.target.matches('input,select,textarea'))scheduleAutoSave();
 });
 function commitPropertyEdit(){
-  if(_propertyEditBefore===null)return;
-  const before=_propertyEditBefore;
-  _propertyEditBefore=null;
-  if(before!==historySnapshot())pushHistorySnapshot(before);
-  scheduleAutoSave();
+  commitProjectChange('property');
 }
 _propertyPanelBody.addEventListener('change',commitPropertyEdit);
 _propertyPanelBody.addEventListener('focusout',commitPropertyEdit);
 
 function clearAll(){
-  if(!confirm('Очистить всё?'))return;savH();
-  G.verts=[];G.walls=[];G.doors=[];G.windows=[];G.equip=[];G.measures=[];G.cables=[];G.comments=[];G.cablePts=[];G.cableStepSizes=[];G.cableType=null;
-  // кастомное оборудование сохраняется
-  // Кастомное оборудование НЕ очищаем — пользователь его настраивал отдельно
-  G.drawOn=false;G.drawS=null;G.drawC=null;G.sel=null;
+  if(!confirm('Очистить всё?'))return;
+  runProjectChange('clear',()=>{
+    G.verts=[];G.walls=[];G.doors=[];G.windows=[];G.equip=[];G.measures=[];G.cables=[];G.comments=[];G.cablePts=[];G.cableStepSizes=[];G.cableType=null;
+    // Кастомное оборудование сохраняется — пользователь его настраивал отдельно
+    G.drawOn=false;G.drawS=null;G.drawC=null;G.sel=null;
+  });
   closeP();if(G.mode==='2d')rd();else buildScene3();updateCableUI();
 }
 

@@ -112,6 +112,8 @@ const VD={
   mode:null,   // 'vert' | 'wall' | null
   vid:null,    // id вершины при mode='vert'
   wIdx:null,   // индекс стены при mode='wall'
+  started:false,
+  startX:0,startY:0,
   dx:0,dy:0,  // смещение при перетаскивании стены
 };
 
@@ -369,6 +371,7 @@ cv.addEventListener('mousemove',e=>{
   }
   // Перетаскивание вершины
   if(VD.mode==='vert'){
+    if(!VD.started){beginProjectChange('move-vertex');VD.started=true;}
     const v=G.verts.find(v=>v.id===VD.vid);
     if(v){
       v.x=sn(wx);v.y=sn(wy);
@@ -383,6 +386,10 @@ cv.addEventListener('mousemove',e=>{
   }
   // Перетаскивание стены целиком
   if(VD.mode==='wall'){
+    if(!VD.started){
+      if(L(wx,wy,VD.startX,VD.startY)<1/G.zoom)return;
+      beginProjectChange('move-wall');detachWallFull(VD.wIdx);VD.started=true;
+    }
     const w=G.walls[VD.wIdx];
     const v1=G.verts.find(v=>v.id===w.v1id);
     const v2=G.verts.find(v=>v.id===w.v2id);
@@ -395,7 +402,7 @@ cv.addEventListener('mousemove',e=>{
     return;
   }
   if(G.dragEq2d!==null){
-    if(!eqDragged2d){savH();Core.detachEquipmentFromWall(G.equip[G.dragEq2d]);eqDragged2d=true;}
+    if(!eqDragged2d){beginProjectChange('move-equipment');Core.detachEquipmentFromWall(G.equip[G.dragEq2d]);eqDragged2d=true;}
     G.equip[G.dragEq2d].x=wx;G.equip[G.dragEq2d].y=wy;rd();
   }
 });
@@ -404,7 +411,8 @@ cv.addEventListener('mousedown',e=>{
     const rc=cv.getBoundingClientRect();G.panning=true;G.panF={x:e.clientX-rc.left,y:e.clientY-rc.top};cv.style.cursor='grabbing';return;
   }
   if(e.button===2){
-    if(G.dragEq2d!==null&&eqDragged2d)attachEqToNearestWall(G.equip[G.dragEq2d]);
+    if(G.dragEq2d!==null&&eqDragged2d){attachEqToNearestWall(G.equip[G.dragEq2d]);commitProjectChange('move-equipment');}
+    if(VD.mode&&VD.started){if(VD.mode==='wall')cleanVerts();commitProjectChange(VD.mode==='wall'?'move-wall':'move-vertex');}
     G.panning=false;G.dragEq2d=null;VD.mode=null;VD.vid=null;VD.wIdx=null;
     eqDragged2d=false;
     setTool('select');cv.style.cursor='crosshair';return;
@@ -421,13 +429,12 @@ cv.addEventListener('mousedown',e=>{
     const wi=findWall(wx,wy);
     if(wi!==null){
       selObj('wall',wi);
-      savH();
-      detachWallFull(wi);
       const w=G.walls[wi];
       const v1=G.verts.find(v=>v.id===w.v1id);
       const v2=G.verts.find(v=>v.id===w.v2id);
       if(v1&&v2){
         VD.mode='wall';VD.wIdx=wi;
+        VD.started=false;VD.startX=wx;VD.startY=wy;
         VD.ox1=v1.x-wx;VD.oy1=v1.y-wy;
         VD.wdx=v2.x-v1.x;VD.wdy=v2.y-v1.y;
       }
@@ -450,7 +457,7 @@ cv.addEventListener('mousedown',e=>{
       const en=sv2?{x:sv2.x,y:sv2.y}:(G.drawC||{x:wx,y:wy});
       const s=G.drawS;
       if(L(s.x,s.y,en.x,en.y)>4){
-        savH();
+        beginProjectChange('draw-opening-or-wall');
         if(G.tool==='wall'){
           const v1=getOrCreateVert(s.x,s.y);
           const v2=getOrCreateVert(en.x,en.y);
@@ -463,6 +470,7 @@ cv.addEventListener('mousedown',e=>{
           const wni=addOpeningBetween(G.windows,s,en,{wh:null,sill:null});
           G.sel={t:'window',i:wni}; showP('window',wni);
         }
+        commitProjectChange('draw-opening-or-wall');
         G.drawS={x:en.x,y:en.y};G.drawC={x:en.x,y:en.y};
       }
       rd();
@@ -471,22 +479,21 @@ cv.addEventListener('mousedown',e=>{
   }
   if(G.tool==='measure'){
     if(!G.drawOn){G.drawOn=true;G.drawS={x:wx,y:wy};G.drawC={x:wx,y:wy};}
-    else{savH();G.measures.push({x1:G.drawS.x,y1:G.drawS.y,x2:wx,y2:wy});G.drawOn=false;G.drawS=null;G.drawC=null;rd();}
+    else{runProjectChange('draw-measure',()=>G.measures.push({x1:G.drawS.x,y1:G.drawS.y,x2:wx,y2:wy}));G.drawOn=false;G.drawS=null;G.drawC=null;rd();}
     return;
   }
 });
 cv.addEventListener('mouseup',e=>{
   if(G.panning){G.panning=false;cv.style.cursor='crosshair';}
-  if(G.dragEq2d!==null){if(eqDragged2d){attachEqToNearestWall(G.equip[G.dragEq2d]);scheduleAutoSave();}G.dragEq2d=null;eqDragged2d=false;rd();}
-  else if(VD.mode==='wall')scheduleAutoSave();
-  if(VD.mode==='wall'){VD.mode=null;VD.wIdx=null;cleanVerts();rd();return;}
+  if(G.dragEq2d!==null){if(eqDragged2d){attachEqToNearestWall(G.equip[G.dragEq2d]);commitProjectChange('move-equipment');}G.dragEq2d=null;eqDragged2d=false;rd();}
+  if(VD.mode){if(VD.started){if(VD.mode==='wall')cleanVerts();commitProjectChange(VD.mode==='wall'?'move-wall':'move-vertex');}VD.mode=null;VD.vid=null;VD.wIdx=null;VD.started=false;rd();return;}
   // Drag-to-draw: если тянули стену/дверь — завершить при mouseup
   if(G.drawOn&&G._dragging&&(G.tool==='wall'||G.tool==='door'||G.tool==='window')){
     const sv=nearVert(G.drawC.x,G.drawC.y);
     const en=sv||G.drawC;
     const st=G.drawS;
     if(L(st.x,st.y,en.x,en.y)>4){
-      savH();
+      beginProjectChange('draw-opening-or-wall');
       if(G.tool==='wall'){
         const v1=getOrCreateVert(st.x,st.y);
         const v2=getOrCreateVert(en.x,en.y);
@@ -499,6 +506,7 @@ cv.addEventListener('mouseup',e=>{
         const wni=addOpeningBetween(G.windows,st,en,{wh:null,sill:null});
         G.sel={t:'window',i:wni};showP('window',wni);
       }
+      commitProjectChange('draw-opening-or-wall');
     }
     G.drawOn=false;G.drawS=null;G.drawC=null;G._dragging=false;
     rd();return;
@@ -511,10 +519,11 @@ cv.addEventListener('dblclick',e=>{
     const rc=cv.getBoundingClientRect(),raw=s2w(e.clientX-rc.left,e.clientY-rc.top);
     const wx=sn(raw.x),wy=sn(raw.y);
     const sz=G.gs||10; // размер = шаг сетки
-    savH();
+    beginProjectChange('draw-wall');
     const v1=getOrCreateVert(wx-sz/2,wy);
     const v2=getOrCreateVert(wx+sz/2,wy);
     const wi=addWallBetween(v1,v2);
+    commitProjectChange('draw-wall');
     G.drawOn=false;G.drawS=null;G.drawC=null;
     G.sel={t:'wall',i:wi};showP('wall',wi);rd();
   } else if(G.drawOn&&(G.tool==='door'||G.tool==='window')){
@@ -533,7 +542,7 @@ cv.addEventListener('drop',e=>{
   const type=e.dataTransfer.getData('text/plain');
   if(!type||type==='wall'||type==='door'||type==='window'||type==='measure'||type==='select')return;
   const rc=cv.getBoundingClientRect(),raw=s2w(e.clientX-rc.left,e.clientY-rc.top);
-  savH();addEq(type,sn(raw.x),sn(raw.y));
+  runProjectChange('add-equipment',()=>addEq(type,sn(raw.x),sn(raw.y)));
 });
 // Назначаем dragstart на все .ei в панели
 function bindDragItems(){
@@ -663,12 +672,15 @@ function setWinLen(m){if(!G.sel||G.sel.t!=='window')return;const w=G.windows[G.s
 function refresh3d(){if(G.mode==='3d')buildScene3();else rd();}
 function closeP(){G.sel=null;document.getElementById('props').classList.remove('on');rd();}
 function delSel(){
-  if(!G.sel)return;savH();
-  if(G.sel.t==='wall'){const wall=G.walls[G.sel.i];if(wall){Core.detachWallOpenings(G,wall.id);Core.detachWallEquipment(G,wall.id);}G.walls.splice(G.sel.i,1);}
-  if(G.sel.t==='door')G.doors.splice(G.sel.i,1);
-  if(G.sel.t==='window')G.windows.splice(G.sel.i,1);
-  if(G.sel.t==='eq')G.equip.splice(G.sel.i,1);
-  if(G.sel.t==='cable'){G.cables.splice(G.sel.i,1);updateCableUI();}
+  if(!G.sel)return;
+  runProjectChange('delete-selection',()=>{
+    if(G.sel.t==='wall'){const wall=G.walls[G.sel.i];if(wall){Core.detachWallOpenings(G,wall.id);Core.detachWallEquipment(G,wall.id);}G.walls.splice(G.sel.i,1);}
+    if(G.sel.t==='door')G.doors.splice(G.sel.i,1);
+    if(G.sel.t==='window')G.windows.splice(G.sel.i,1);
+    if(G.sel.t==='eq')G.equip.splice(G.sel.i,1);
+    if(G.sel.t==='cable')G.cables.splice(G.sel.i,1);
+  });
+  updateCableUI();
   G.sel=null;closeP();refresh3d();
 }
 

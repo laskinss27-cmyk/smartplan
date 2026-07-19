@@ -54,25 +54,25 @@ function syncProjectControls(){
 function setProjectScale(value){
   const nextScale=Core.normalizeScale(value,G.sc);
   if(nextScale===G.sc){syncProjectControls();return;}
-  savH();
+  beginProjectChange('scale');
   Core.rescaleProjectGeometry(G,G.sc,nextScale);
   G.sc=nextScale;
   syncAllWalls();
   syncProjectControls();
   if(G.sel)showP(G.sel.t,G.sel.i);
   refresh3d();
+  commitProjectChange('scale');
 }
 
 let _snapEditOpen=false;
 let _snapEditTimer=null;
 function setSnapMeters(value){
   const meters=Math.max(0.05,Math.min(1,Number(value)||Core.DEFAULT_SNAP_METERS));
-  if(!_snapEditOpen){savH();_snapEditOpen=true;}
+  if(!_snapEditOpen){beginProjectChange('snap-size');_snapEditOpen=true;}
   G.gs=Core.metersToUnits(meters,G.sc);
   document.getElementById('gszv').textContent=meters.toFixed(2)+'м';
   clearTimeout(_snapEditTimer);
-  _snapEditTimer=setTimeout(()=>{_snapEditOpen=false;},400);
-  scheduleAutoSave();
+  _snapEditTimer=setTimeout(()=>{_snapEditOpen=false;commitProjectChange('snap-size');},400);
   rd();
 }
 

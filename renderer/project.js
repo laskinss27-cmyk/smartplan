@@ -121,6 +121,7 @@ function confirmAddEq(){
   const subInp=document.getElementById('aeq-sub');
   const sub=subInp?subInp.value.trim():'';
   const behavior=document.getElementById('aeq-behavior')?.value||'normal';
+  beginProjectChange('add-custom-equipment');
   const type='custom_'+G.nextId++;
   G.customEq.push({type,name,sub,svgData:_aeqSvg||null,behavior});
   EQ_NAMES[type]=name;
@@ -133,6 +134,7 @@ function confirmAddEq(){
   renderCustomEqPanel();
   // Сохраняем кастомный список
   try{localStorage.setItem(LS_EQ_KEY,JSON.stringify(G.customEq));}catch(e){}
+  commitProjectChange('add-custom-equipment');
   closeAddEq();
 }
 
@@ -178,7 +180,7 @@ function deleteCustomEq(type){
     ? 'Удалить «'+ceq.name+'» из библиотеки?\nНа плане размещено: '+placed+' шт. Они тоже будут удалены.'
     : 'Удалить «'+ceq.name+'» из библиотеки?';
   if(!confirm(msg))return;
-  savH();
+  beginProjectChange('delete-custom-equipment');
   // Удаляем размещённые экземпляры
   G.equip=G.equip.filter(e=>e.type!==type);
   // Удаляем привязанные кабели (если кабель шёл к удаляемому объекту)
@@ -202,6 +204,7 @@ function deleteCustomEq(type){
   }
   renderCustomEqPanel();
   try{localStorage.setItem(LS_EQ_KEY,JSON.stringify(G.customEq));}catch(e){}
+  commitProjectChange('delete-custom-equipment');
   refresh3d();
   closeP();
 }
@@ -270,7 +273,7 @@ function applyProjectData(data){
   renderCustomEqPanel();
   G.sel=null; G.drawOn=false; G.drawS=null; G.drawC=null;
   G.cablePts=[];G.cableStepSizes=[];G.cableType=null;
-  G.hist=[];G.future=[];
+  resetProjectHistory();
   G.floors=Math.max(1,...G.walls.map(w=>w.floor||1),...G.equip.map(e=>e.floor||1));
   G.floor=Math.min(G.floor||1,G.floors);
   syncProjectControls();
@@ -334,8 +337,7 @@ function autoSave(){
     const data=getProjectData();
     localStorage.setItem(LS_KEY, JSON.stringify(data));
     // Кастомное оборудование отдельно — восстанавливается даже в новом проекте
-    if(G.customEq.length)
-      localStorage.setItem(LS_EQ_KEY, JSON.stringify(G.customEq));
+    localStorage.setItem(LS_EQ_KEY, JSON.stringify(G.customEq));
   }catch(e){}
 }
 
@@ -452,8 +454,9 @@ function confirmComment(){
   const p=_commentPos;
   closeComment();
   if(txt&&p){
-    savH();
+    beginProjectChange('add-comment');
     G.comments.push({id:G.nextId++,x:p.x,y:p.y,z:p.z,text:txt});
+    commitProjectChange('add-comment');
     buildScene3();
   }
 }

@@ -68,6 +68,101 @@
     return { x, y, t, distance: distance2d(px, py, x, y) };
   }
 
+  function createSnapshotHistory(capture, restore, options = {}) {
+    if (typeof capture !== 'function' || typeof restore !== 'function') {
+      throw new TypeError('Snapshot history requires capture and restore functions');
+    }
+    const limit = Math.max(1, Math.trunc(finiteNumber(options.limit, 60)));
+    const undoStack = Array.isArray(options.undoStack) ? options.undoStack : [];
+    const redoStack = Array.isArray(options.redoStack) ? options.redoStack : [];
+    const onChange = typeof options.onChange === 'function' ? options.onChange : () => {};
+    let transaction = null;
+
+    const trim = (stack) => {
+      if (stack.length > limit) stack.splice(0, stack.length - limit);
+    };
+    const pushUnique = (stack, snapshot) => {
+      if (stack[stack.length - 1] !== snapshot) stack.push(snapshot);
+      trim(stack);
+    };
+    const commit = (label = null) => {
+      if (!transaction) return false;
+      if (label != null && transaction.label !== String(label)) return false;
+      const before = transaction.snapshot;
+      transaction = null;
+      if (before === capture()) return false;
+      pushUnique(undoStack, before);
+      redoStack.length = 0;
+      onChange('commit');
+      return true;
+    };
+    const begin = (label = 'change') => {
+      const normalizedLabel = String(label || 'change');
+      if (transaction && transaction.label !== normalizedLabel) commit();
+      if (!transaction) transaction = { label: normalizedLabel, snapshot: capture() };
+      return transaction.snapshot;
+    };
+    const cancel = () => {
+      if (!transaction) return false;
+      transaction = null;
+      return true;
+    };
+    const run = (label, mutator) => {
+      if (typeof label === 'function') {
+        mutator = label;
+        label = 'change';
+      }
+      begin(label);
+      try {
+        const result = mutator();
+        commit();
+        return result;
+      } catch (error) {
+        const before = transaction?.snapshot;
+        transaction = null;
+        if (before != null) restore(before);
+        onChange('rollback');
+        throw error;
+      }
+    };
+    const undo = () => {
+      if (transaction) commit();
+      if (!undoStack.length) return false;
+      const previous = undoStack.pop();
+      pushUnique(redoStack, capture());
+      restore(previous);
+      onChange('undo');
+      return true;
+    };
+    const redo = () => {
+      if (transaction) commit();
+      if (!redoStack.length) return false;
+      const next = redoStack.pop();
+      pushUnique(undoStack, capture());
+      restore(next);
+      onChange('redo');
+      return true;
+    };
+    const reset = () => {
+      transaction = null;
+      undoStack.length = 0;
+      redoStack.length = 0;
+    };
+
+    return Object.freeze({
+      begin,
+      commit,
+      cancel,
+      run,
+      undo,
+      redo,
+      reset,
+      undoStack,
+      redoStack,
+      isActive: () => transaction !== null
+    });
+  }
+
   function resizeSegmentFromStart(segment, lengthValue) {
     const x1 = finiteNumber(segment?.x1, 0);
     const y1 = finiteNumber(segment?.y1, 0);
@@ -809,6 +904,7 @@
     distance2d,
     pointToSegmentDistance2d,
     projectPointToSegment2d,
+    createSnapshotHistory,
     resizeSegmentFromStart,
     syncWallFromVertices,
     detachWallEndpoint,
