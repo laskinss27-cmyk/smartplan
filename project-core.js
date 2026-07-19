@@ -8,7 +8,7 @@
   const DEFAULT_SCALE = 0.1;
   const DEFAULT_SNAP_METERS = 0.25;
   const DEFAULT_WALL_THICKNESS_METERS = 0.2;
-  const CURRENT_MODEL_REVISION = 5;
+  const CURRENT_MODEL_REVISION = 6;
   const MAX_PROJECT_ITEMS = 100000;
   const MAX_PROJECT_NODES = 500000;
   const MAX_STRING_LENGTH = 2 * 1024 * 1024;
@@ -369,6 +369,119 @@
     return project;
   }
 
+  const WALL_EQUIPMENT_TYPES = Object.freeze([
+    'camera', 'doorbell', 'monitor', 'socket', 'panel', 'heat', 'nvr', 'ac'
+  ]);
+
+  function equipmentMountKind(equipment, customDefinitions = []) {
+    if (!equipment) return 'free';
+    const custom = Array.isArray(customDefinitions)
+      ? customDefinitions.find((definition) => definition?.type === equipment.type)
+      : null;
+    if (custom) return custom.behavior === 'light' ? (equipment.h3 == null ? 'ceiling' : 'wall') : 'wall';
+    if (equipment.type === 'light') return equipment.h3 == null ? 'ceiling' : 'wall';
+    if (equipment.type === 'pillar' || equipment.type === 'tree') return 'floor';
+    return WALL_EQUIPMENT_TYPES.includes(equipment.type) ? 'wall' : 'free';
+  }
+
+  function attachEquipmentToWall(equipment, wall, options = {}) {
+    if (!equipment || !wall || !Number.isInteger(wall.id)) return null;
+    const floor = normalizeFloor(equipment.floor);
+    if (normalizeFloor(wall.floor) !== floor) return null;
+    const projection = projectPointToSegment2d(equipment.x, equipment.y, wall);
+    const wallDx = wall.x2 - wall.x1;
+    const wallDy = wall.y2 - wall.y1;
+    const wallLength = Math.hypot(wallDx, wallDy);
+    if (wallLength <= 1e-9) return null;
+    const nx = wallDy / wallLength;
+    const ny = -wallDx / wallLength;
+    const signedDistance = (equipment.x - projection.x) * nx + (equipment.y - projection.y) * ny;
+    const side = options.side === -1 || options.side === 1
+      ? options.side
+      : (Math.abs(signedDistance) <= 1e-9 && equipment.wallSide === -1 ? -1 : (signedDistance >= 0 ? 1 : -1));
+    equipment.wallId = wall.id;
+    equipment.wallPosition = projection.t;
+    equipment.wallSide = side;
+    equipment.floor = floor;
+    if (options.snap !== false) syncEquipmentToWall(equipment, wall);
+    return wall.id;
+  }
+
+  function attachEquipmentToNearestWall(equipment, walls, options = {}) {
+    if (!equipment || !Array.isArray(walls)) return null;
+    const floor = normalizeFloor(equipment.floor);
+    const maxDistance = Math.max(0, finiteNumber(options.maxDistance, metersToUnits(0.4, options.scale)));
+    let best = null;
+    walls.forEach((wall) => {
+      if (!Number.isInteger(wall.id) || normalizeFloor(wall.floor) !== floor) return;
+      const projection = projectPointToSegment2d(equipment.x, equipment.y, wall);
+      if (projection.distance > maxDistance || (best && projection.distance >= best.distance)) return;
+      best = { wall, distance: projection.distance };
+    });
+    return best ? attachEquipmentToWall(equipment, best.wall, options) : null;
+  }
+
+  function syncEquipmentToWall(equipment, wall) {
+    if (!equipment || !wall || equipment.wallId !== wall.id) return false;
+    const wallDx = wall.x2 - wall.x1;
+    const wallDy = wall.y2 - wall.y1;
+    const wallLength = Math.hypot(wallDx, wallDy);
+    if (wallLength <= 1e-9) return false;
+    const position = Math.max(0, Math.min(1, finiteNumber(equipment.wallPosition, 0.5)));
+    equipment.x = wall.x1 + wallDx * position;
+    equipment.y = wall.y1 + wallDy * position;
+    equipment.wallPosition = position;
+    equipment.floor = normalizeFloor(wall.floor);
+    return true;
+  }
+
+  function syncWallEquipment(project, wallId) {
+    if (!project || !Array.isArray(project.walls)) return 0;
+    const wall = project.walls.find((item) => item.id === wallId);
+    if (!wall) return 0;
+    let updated = 0;
+    (project.equip || []).forEach((equipment) => {
+      if (syncEquipmentToWall(equipment, wall)) updated += 1;
+    });
+    return updated;
+  }
+
+  function detachEquipmentFromWall(equipment) {
+    if (!equipment || !Number.isInteger(equipment.wallId)) return false;
+    delete equipment.wallId;
+    delete equipment.wallPosition;
+    delete equipment.wallSide;
+    return true;
+  }
+
+  function detachWallEquipment(project, wallId) {
+    let detached = 0;
+    (project?.equip || []).forEach((equipment) => {
+      if (equipment.wallId !== wallId) return;
+      if (detachEquipmentFromWall(equipment)) detached += 1;
+    });
+    return detached;
+  }
+
+  function migrateEquipmentAttachments(project) {
+    if (!project || !Array.isArray(project.walls)) return project;
+    const options = { scale: project.sc, maxDistance: metersToUnits(0.4, project.sc), snap: false };
+    (project.equip || []).forEach((equipment) => {
+      if (equipmentMountKind(equipment, project.customEq) !== 'wall') {
+        detachEquipmentFromWall(equipment);
+        return;
+      }
+      const attachedWall = Number.isInteger(equipment.wallId)
+        ? project.walls.find((wall) => wall.id === equipment.wallId && normalizeFloor(wall.floor) === normalizeFloor(equipment.floor))
+        : null;
+      if (!attachedWall) {
+        detachEquipmentFromWall(equipment);
+        attachEquipmentToNearestWall(equipment, project.walls, options);
+      }
+    });
+    return project;
+  }
+
   function scenePresetConfig(value, scaleValue = DEFAULT_SCALE) {
     const scale = normalizeScale(scaleValue);
     if (value === 'architectural') {
@@ -679,6 +792,7 @@
     if ((data.modelRevision || 0) < 3) migrateWallTopology(data);
     if ((data.modelRevision || 0) < 4) normalizeWallConnections(data);
     if ((data.modelRevision || 0) < 5) migrateOpeningAttachments(data);
+    if ((data.modelRevision || 0) < 6) migrateEquipmentAttachments(data);
     data.modelRevision = CURRENT_MODEL_REVISION;
     return data;
   }
@@ -707,6 +821,15 @@
     syncWallOpenings,
     detachWallOpenings,
     migrateOpeningAttachments,
+    WALL_EQUIPMENT_TYPES,
+    equipmentMountKind,
+    attachEquipmentToWall,
+    attachEquipmentToNearestWall,
+    syncEquipmentToWall,
+    syncWallEquipment,
+    detachEquipmentFromWall,
+    detachWallEquipment,
+    migrateEquipmentAttachments,
     scenePresetConfig,
     escapeHtml,
     validateProjectData,

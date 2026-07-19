@@ -300,18 +300,15 @@ function drawSceneOnCtx(ctx,scale){
     const _isCamera=eq.type==='camera'||(G.customEq.find(c=>c.type===eq.type)?.behavior==='camera');
     if(_isCamera&&eq.fovOn!==false){
       const fa=(eq.fovA||60)*Math.PI/180,fd=eq.fovD||120;
-      // Вычисляем угол так же как в equip2d: нормаль ближайшей стены + пользовательский поворот
-      let baseAng=0,bwD=999999;
-      G.walls.forEach(w=>{
-        const d=dSeg(eq.x,eq.y,w.x1,w.y1,w.x2,w.y2);
-        if(d<bwD){
-          bwD=d;
-          const wa=Math.atan2(w.y2-w.y1,w.x2-w.x1);
-          const nx=Math.sin(wa),nz=-Math.cos(wa);
-          const side=(eq.x-w.x1)*nx+(eq.y-w.y1)*nz>=0?1:-1;
-          baseAng=Math.atan2(nz*side,nx*side);
-        }
-      });
+      // Вычисляем угол так же как в equip2d: нормаль закреплённой стены + пользовательский поворот
+      let baseAng=0;
+      const bw=Number.isInteger(eq.wallId)?G.walls.find(w=>w.id===eq.wallId&&(w.floor||1)===(eq.floor||1)):null;
+      if(bw){
+        const wa=Math.atan2(bw.y2-bw.y1,bw.x2-bw.x1);
+        const nx=Math.sin(wa),nz=-Math.cos(wa);
+        const side=eq.wallSide===-1?-1:1;
+        baseAng=Math.atan2(nz*side,nx*side);
+      }
       const ra=-(eq.ang||0)*Math.PI/180+baseAng;
       ctx.save();ctx.translate(eq.x,eq.y);ctx.rotate(ra);
       ctx.fillStyle='rgba(76,142,247,.15)';ctx.beginPath();ctx.moveTo(0,0);ctx.arc(0,0,fd,-fa/2,fa/2);ctx.closePath();ctx.fill();

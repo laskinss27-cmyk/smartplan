@@ -237,6 +237,74 @@ test('deleting a wall detaches its openings without moving them', () => {
   assert.deepEqual(coordinatesAfter, coordinatesBefore);
 });
 
+test('wall equipment follows a moved wall while preserving height and side', () => {
+  const wall = { id: 12, x1: 0, y1: 0, x2: 100, y2: 0, floor: 1 };
+  const camera = { id: 1, type: 'camera', x: 30, y: 2, h3: 15, floor: 1 };
+
+  assert.equal(Core.attachEquipmentToNearestWall(camera, [wall], { maxDistance: 5 }), 12);
+  assert.deepEqual({ x: camera.x, y: camera.y, wallPosition: camera.wallPosition, wallSide: camera.wallSide }, { x: 30, y: 0, wallPosition: 0.3, wallSide: -1 });
+  wall.x1 = 10;
+  wall.y1 = 10;
+  wall.x2 = 10;
+  wall.y2 = 110;
+  assert.equal(Core.syncEquipmentToWall(camera, wall), true);
+  assert.deepEqual({ x: camera.x, y: camera.y, h3: camera.h3, wallSide: camera.wallSide }, { x: 10, y: 40, h3: 15, wallSide: -1 });
+});
+
+test('equipment mount classification keeps ceiling and floor objects independent', () => {
+  const custom = [
+    { type: 'custom_cam', behavior: 'camera' },
+    { type: 'custom_light', behavior: 'light' }
+  ];
+  assert.equal(Core.equipmentMountKind({ type: 'socket' }), 'wall');
+  assert.equal(Core.equipmentMountKind({ type: 'light', h3: null }), 'ceiling');
+  assert.equal(Core.equipmentMountKind({ type: 'light', h3: 15 }), 'wall');
+  assert.equal(Core.equipmentMountKind({ type: 'pillar' }), 'floor');
+  assert.equal(Core.equipmentMountKind({ type: 'tree' }), 'floor');
+  assert.equal(Core.equipmentMountKind({ type: 'custom_cam' }, custom), 'wall');
+  assert.equal(Core.equipmentMountKind({ type: 'custom_light', h3: null }, custom), 'ceiling');
+  assert.equal(Core.equipmentMountKind({ type: 'unknown' }), 'free');
+});
+
+test('equipment migration binds only confident wall-mounted matches', () => {
+  const data = {
+    version: 3,
+    modelRevision: 5,
+    sc: 0.1,
+    walls: [{ id: 7, x1: 0, y1: 0, x2: 100, y2: 0, floor: 1 }],
+    equip: [
+      { id: 1, type: 'camera', x: 20, y: 1, floor: 1 },
+      { id: 2, type: 'socket', x: 20, y: 50, floor: 1 },
+      { id: 3, type: 'light', x: 30, y: 1, h3: null, floor: 1, wallId: 7, wallPosition: 0.3, wallSide: 1 },
+      { id: 4, type: 'light', x: 40, y: 1, h3: 15, floor: 1 },
+      { id: 5, type: 'pillar', x: 50, y: 1, floor: 1, wallId: 7, wallPosition: 0.5, wallSide: 1 },
+      { id: 6, type: 'custom_cam', x: 60, y: 1, floor: 1 }
+    ],
+    customEq: [{ type: 'custom_cam', behavior: 'camera' }]
+  };
+
+  Core.migrateLegacyDefaults(data);
+  assert.equal(data.equip[0].wallId, 7);
+  assert.equal(data.equip[1].wallId, undefined);
+  assert.equal(data.equip[2].wallId, undefined);
+  assert.equal(data.equip[3].wallId, 7);
+  assert.equal(data.equip[4].wallId, undefined);
+  assert.equal(data.equip[5].wallId, 7);
+  assert.equal(data.equip[0].y, 1);
+  assert.equal(data.modelRevision, Core.CURRENT_MODEL_REVISION);
+  const migrated = JSON.stringify(data);
+  Core.migrateLegacyDefaults(data);
+  assert.equal(JSON.stringify(data), migrated);
+});
+
+test('deleting a wall detaches its equipment without moving it', () => {
+  const project = {
+    equip: [{ id: 1, type: 'socket', x: 25, y: 0, wallId: 3, wallPosition: 0.25, wallSide: 1 }]
+  };
+  assert.equal(Core.detachWallEquipment(project, 3), 1);
+  assert.deepEqual(project.equip[0], { id: 1, type: 'socket', x: 25, y: 0 });
+});
+
 test('cable routing prefers stable wall IDs after walls are reordered', () => {
   const walls = [
     { id: 20, x1: 100, y1: 0, x2: 100, y2: 100, floor: 1 },

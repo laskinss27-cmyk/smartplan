@@ -484,20 +484,12 @@ function placeEq3(sc,eq){
     mesh.rotation.x=-Math.PI/2; // лицом вниз
   } else {
     // Wall mount (includes 'any' with explicit h3 set to wall height)
-    let bw=null,bd=999999,bt=0;
-    G.walls.filter(w=>(w.floor||1)===(eq.floor||1)).forEach(w=>{
-      const d=dSeg(eq.x,eq.y,w.x1,w.y1,w.x2,w.y2);
-      if(d<bd){
-        bd=d; bw=w;
-        const wl2=Math.max(1,(w.x2-w.x1)**2+(w.y2-w.y1)**2);
-        bt=Math.max(0,Math.min(1,((eq.x-w.x1)*(w.x2-w.x1)+(eq.y-w.y1)*(w.y2-w.y1))/wl2));
-      }
-    });
-    if(bw && bd<200){
+    const bw=Number.isInteger(eq.wallId)?G.walls.find(w=>w.id===eq.wallId&&(w.floor||1)===(eq.floor||1)):null;
+    if(bw){
+      const bt=Math.max(0,Math.min(1,Number.isFinite(eq.wallPosition)?eq.wallPosition:0.5));
       const wa=Math.atan2(bw.y2-bw.y1,bw.x2-bw.x1);
       const nx=Math.sin(wa), nz=-Math.cos(wa);
-      const dot=(eq.x-bw.x1)*nx+(eq.y-bw.y1)*nz;
-      const side=dot>=0?1:-1;
+      const side=eq.wallSide===-1?-1:1;
       const px=bw.x1+(bw.x2-bw.x1)*bt;
       const pz=bw.y1+(bw.y2-bw.y1)*bt;
       const wallThick3d=wallThicknessUnits(bw);
@@ -639,6 +631,7 @@ function setup3dEv(el){
   const MP=new THREE.Vector2();
   // Move state
   let mvIdx=-1; // index in G.equip being dragged
+  let mvStarted=false;
   let mvPlane=new THREE.Plane(); // drag plane in world space
   // Resize state
   let resizeCorner=null; // 'TL'|'TR'|'BL'|'BR'
@@ -730,6 +723,7 @@ function setup3dEv(el){
       if(hits.length){
         const eqId=parseInt(hits[0].object.name.replace('eq_',''));
         mvIdx=G.equip.findIndex(q=>q.id===eqId);
+        mvStarted=false;
         if(G.selEqId3!==eqId){G.selEqId3=eqId;buildScene3();}
         if(mvIdx>=0){
           // Открываем панель свойств чтобы редактировать модель
@@ -776,8 +770,10 @@ function setup3dEv(el){
       // Intersect ray with drag plane
       if(RAY.ray.intersectPlane(mvPlane,target)){
         const eq=G.equip[mvIdx];
+        if(!mvStarted){savH();Core.detachEquipmentFromWall(eq);mvStarted=true;}
         const mount=EQ_MOUNT[eq.type]||'wall';
         if(mount==='ceiling'){
+          Core.detachEquipmentFromWall(eq);
           // Snap to ceiling: keep y at WALL_H, move x/z freely
           eq.x=target.x;
           eq.y3z=target.z; // store ceiling position
@@ -792,7 +788,7 @@ function setup3dEv(el){
           // это позволяет «оторвать» светильник от стены, перетаскивая курсор вверх.
           if(ceilMH&&(!wallMH||ceilMH.distance<wallMH.distance*1.8)){
             // Крепление к потолку — этаж сохраняем (eq.floor не меняем).
-            eq.x=ceilMH.point.x; eq.y=ceilMH.point.z; eq.h3=null;
+            eq.x=ceilMH.point.x; eq.y=ceilMH.point.z; eq.h3=null;Core.detachEquipmentFromWall(eq);
           }else if(wallMH){
             // Крепление к стене — этаж по y, h3 относительно низа этажа
             const _mF1W=G.walls.filter(w=>(w.floor||1)===1);
@@ -804,9 +800,14 @@ function setup3dEv(el){
             }else{
               eq.floor=1; eq.h3=Math.max(0.1/G.sc, wallMH.point.y);
             }
+            const wallId=wallMH.object.userData.wallId;
+            const wall=Number.isInteger(wallId)?G.walls.find(w=>w.id===wallId):null;
+            if(wall){eq.floor=wall.floor||1;Core.attachEquipmentToWall(eq,wall);}
           }else{
-            eq.x=target.x; eq.y=target.z;
+            eq.x=target.x; eq.y=target.z;Core.detachEquipmentFromWall(eq);
           }
+        } else if(mount==='floor'){
+          eq.x=target.x;eq.y=target.z;Core.detachEquipmentFromWall(eq);
         } else {
           // Try to snap to a wall surface
           const wHits=RAY.intersectObjects(G.SC.children,false)
@@ -822,10 +823,14 @@ function setup3dEv(el){
             }else{
               eq.floor=1; eq.h3=Math.max(0.1/G.sc, wp.y);
             }
+            const wallId=wHits[0].object.userData.wallId;
+            const wall=Number.isInteger(wallId)?G.walls.find(w=>w.id===wallId):null;
+            if(wall){eq.floor=wall.floor||1;Core.attachEquipmentToWall(eq,wall);}
           } else {
             // No wall hit — move freely in xz at current height
             eq.x=target.x;
             eq.y=target.z;
+            Core.detachEquipmentFromWall(eq);
           }
         }
         buildScene3();
@@ -849,7 +854,7 @@ function setup3dEv(el){
       rmbDragged=false;
     }
     if(e.button===0&&resizeCorner){resizeCorner=null;savH();return;}
-    if(e.button===0&&mvIdx>=0){mvIdx=-1;el.style.cursor='default';}
+    if(e.button===0&&mvIdx>=0){if(mvStarted)scheduleAutoSave();mvIdx=-1;mvStarted=false;el.style.cursor='default';}
   });
 
   el.addEventListener('dblclick',()=>{if(!document.pointerLockElement)el.requestPointerLock();});
@@ -886,7 +891,9 @@ function setup3dEv(el){
     const mount=EQ_MOUNT[type]||'wall';
     // Для потолочного оборудования (light, any) — предпочитаем потолок/перекрытие
     let hit;
-    if((mount==='ceiling'||mount==='any')&&ceilHit&&(!wallHit||ceilHit.distance<=wallHit.distance)){
+    if(mount==='floor'&&floorHit){
+      hit=floorHit;
+    }else if((mount==='ceiling'||mount==='any')&&ceilHit&&(!wallHit||ceilHit.distance<=wallHit.distance)){
       hit=ceilHit;
     }else{
       hit=wallHit||floorHit||ceilHit||allHits[0];
@@ -919,9 +926,16 @@ function setup3dEv(el){
       // остальные случаи (пол, slab снизу и т.д.) — eqFloor=G.floor, h3val=null
     }
     savH();
-    G.equip.push({id:G.nextId++,type,x:wx,y:wy,
+    const ceqDef=G.customEq.find(c=>c.type===type);
+    const newEq={id:G.nextId++,type,x:wx,y:wy,
       name:EQ_NAMES[type]||type,model:'',ang:0,floor:eqFloor,
-      fovA:60,fovD:5/G.sc,fovOn:type==='camera',h3:h3val});
+      fovA:60,fovD:5/G.sc,fovOn:type==='camera'||ceqDef?.behavior==='camera',h3:h3val};
+    if(hit?.object.name==='wall'&&Core.equipmentMountKind(newEq,G.customEq)==='wall'){
+      const wallId=hit.object.userData.wallId;
+      const wall=Number.isInteger(wallId)?G.walls.find(w=>w.id===wallId):null;
+      if(wall){newEq.floor=wall.floor||1;Core.attachEquipmentToWall(newEq,wall);}
+    }
+    G.equip.push(newEq);
     refresh3d();
   });
 

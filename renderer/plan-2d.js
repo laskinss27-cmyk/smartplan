@@ -17,6 +17,7 @@ const L=Core.distance2d;
 const px2m=px=>(px*G.sc).toFixed(2);
 const escHtml=Core.escapeHtml;
 const wallThicknessUnits=w=>Number.isFinite(w?.th)?w.th:Core.defaultWallThicknessUnits(G.sc);
+let eqDragged2d=false;
 
 // ── VERTEX SYSTEM ──────────────────────────────────────────
 // Snap radius: прилипать к существующей вершине если ближе этого расстояния
@@ -59,6 +60,18 @@ function addOpeningBetween(collection,start,end,extra){
   }
   collection.push(opening);
   return collection.length-1;
+}
+
+function attachEqToNearestWall(eq,snap=true){
+  if(Core.equipmentMountKind(eq,G.customEq)!=='wall'){
+    Core.detachEquipmentFromWall(eq);
+    return null;
+  }
+  return Core.attachEquipmentToNearestWall(eq,G.walls,{
+    scale:G.sc,
+    maxDistance:Core.metersToUnits(0.4,G.sc),
+    snap
+  });
 }
 
 // Обновить x1/y1/x2/y2 у стены из вершин
@@ -210,21 +223,15 @@ function equip2d(){
     const _isCamera=eq.type==='camera'||(G.customEq.find(c=>c.type===eq.type)?.behavior==='camera');
     if(_isCamera&&eq.fovOn!==false){
       const fa=(eq.fovA||60)*Math.PI/180,fd=eq.fovD||120;
-      // Базовый угол = нормаль ближайшей стены (как в 3D), + eq.ang как доп. поворот
+      // Базовый угол = нормаль закреплённой стены (как в 3D), + eq.ang как доп. поворот
       let baseAng=0;
-      let bwD=999999;
-      G.walls.forEach(w=>{
-        const d=dSeg(eq.x,eq.y,w.x1,w.y1,w.x2,w.y2);
-        if(d<bwD){
-          bwD=d;
-          const wa=Math.atan2(w.y2-w.y1,w.x2-w.x1);
-          const nx=Math.sin(wa),nz=-Math.cos(wa);
-          const dot=(eq.x-w.x1)*nx+(eq.y-w.y1)*nz;
-          const side=dot>=0?1:-1;
-          // Нормаль стены в 2D (наружу) = угол нормали
-          baseAng=Math.atan2(nz*side,nx*side);
-        }
-      });
+      const bw=Number.isInteger(eq.wallId)?G.walls.find(w=>w.id===eq.wallId&&(w.floor||1)===(eq.floor||1)):null;
+      if(bw){
+        const wa=Math.atan2(bw.y2-bw.y1,bw.x2-bw.x1);
+        const nx=Math.sin(wa),nz=-Math.cos(wa);
+        const side=eq.wallSide===-1?-1:1;
+        baseAng=Math.atan2(nz*side,nx*side);
+      }
       const ra=-(eq.ang||0)*Math.PI/180+baseAng; // минус: 2D canvas Y вниз, 3D Y вверх
       CX.save();CX.translate(eq.x,eq.y);CX.rotate(ra);
       const g=CX.createRadialGradient(0,0,0,0,0,fd);
@@ -369,7 +376,7 @@ cv.addEventListener('mousemove',e=>{
       const near=G.verts.find(ov=>ov.id!==v.id&&Math.sqrt((ov.x-wx)**2+(ov.y-wy)**2)<VSNAP/G.zoom);
       if(near){v.x=near.x;v.y=near.y;}
       syncAllWalls();
-      G.walls.forEach(w=>Core.syncWallOpenings(G,w.id));
+      G.walls.forEach(w=>{Core.syncWallOpenings(G,w.id);Core.syncWallEquipment(G,w.id);});
       rd();
     }
     return;
@@ -383,24 +390,29 @@ cv.addEventListener('mousemove',e=>{
       // Снапим только v1, v2 = v1 + исходный вектор → длина стены не меняется
       v1.x=sn(wx+VD.ox1);v1.y=sn(wy+VD.oy1);
       v2.x=v1.x+VD.wdx;v2.y=v1.y+VD.wdy;
-      syncAllWalls();Core.syncWallOpenings(G,w.id);rd();
+      syncAllWalls();Core.syncWallOpenings(G,w.id);Core.syncWallEquipment(G,w.id);rd();
     }
     return;
   }
-  if(G.dragEq2d!==null){G.equip[G.dragEq2d].x=wx;G.equip[G.dragEq2d].y=wy;rd();}
+  if(G.dragEq2d!==null){
+    if(!eqDragged2d){savH();Core.detachEquipmentFromWall(G.equip[G.dragEq2d]);eqDragged2d=true;}
+    G.equip[G.dragEq2d].x=wx;G.equip[G.dragEq2d].y=wy;rd();
+  }
 });
 cv.addEventListener('mousedown',e=>{
   if(e.button===1||(e.button===0&&e.altKey)){
     const rc=cv.getBoundingClientRect();G.panning=true;G.panF={x:e.clientX-rc.left,y:e.clientY-rc.top};cv.style.cursor='grabbing';return;
   }
   if(e.button===2){
+    if(G.dragEq2d!==null&&eqDragged2d)attachEqToNearestWall(G.equip[G.dragEq2d]);
     G.panning=false;G.dragEq2d=null;VD.mode=null;VD.vid=null;VD.wIdx=null;
+    eqDragged2d=false;
     setTool('select');cv.style.cursor='crosshair';return;
   }
   const rc=cv.getBoundingClientRect(),raw=s2w(e.clientX-rc.left,e.clientY-rc.top),wx=sn(raw.x),wy=sn(raw.y);
   if(G.tool==='select'){
     const ei=findEq(wx,wy);
-    if(ei!==null){G.dragEq2d=ei;selObj('eq',ei);return;}
+    if(ei!==null){eqDragged2d=false;G.dragEq2d=ei;selObj('eq',ei);return;}
     // Проверяем двери и окна ДО стен (они лежат поверх стен)
     const di=findDoor(wx,wy);
     if(di!==null){selObj('door',di);return;}
@@ -465,8 +477,8 @@ cv.addEventListener('mousedown',e=>{
 });
 cv.addEventListener('mouseup',e=>{
   if(G.panning){G.panning=false;cv.style.cursor='crosshair';}
-  if(G.dragEq2d!==null||VD.mode==='wall') scheduleAutoSave();
-  G.dragEq2d=null;
+  if(G.dragEq2d!==null){if(eqDragged2d){attachEqToNearestWall(G.equip[G.dragEq2d]);scheduleAutoSave();}G.dragEq2d=null;eqDragged2d=false;rd();}
+  else if(VD.mode==='wall')scheduleAutoSave();
   if(VD.mode==='wall'){VD.mode=null;VD.wIdx=null;cleanVerts();rd();return;}
   // Drag-to-draw: если тянули стену/дверь — завершить при mouseup
   if(G.drawOn&&G._dragging&&(G.tool==='wall'||G.tool==='door'||G.tool==='window')){
@@ -557,7 +569,9 @@ function desel(){G.sel=null;closeP();rd();}
 function addEq(type,x,y){
   const ceqDef=G.customEq.find(c=>c.type===type);
   const isCamera=type==='camera'||(ceqDef&&ceqDef.behavior==='camera');
-  G.equip.push({id:G.nextId++,type,x,y,name:EQ_NAMES[type]||type,model:'',ang:0,fovA:60,fovD:5/G.sc,fovOn:isCamera,h3:null,floor:G.floor});
+  const eq={id:G.nextId++,type,x,y,name:EQ_NAMES[type]||type,model:'',ang:0,fovA:60,fovD:5/G.sc,fovOn:isCamera,h3:null,floor:G.floor};
+  attachEqToNearestWall(eq);
+  G.equip.push(eq);
   rd();
 }
 
@@ -629,7 +643,7 @@ function showP(t,i){
     <div class="pr"><div class="plb2">Длина</div><div style="font-size:13px;color:var(--gr);font-weight:600">${(cabLen(cab.pts)*G.sc).toFixed(2)} м</div></div>`;
   }
 }
-function upEq(k,v){if(G.sel&&G.sel.t==='eq')G.equip[G.sel.i][k]=v;}
+function upEq(k,v){if(G.sel&&G.sel.t==='eq'){const eq=G.equip[G.sel.i];eq[k]=v;if(k==='h3')attachEqToNearestWall(eq);}}
 function setWLen(m){
   if(!G.sel||G.sel.t!=='wall')return;
   const idx=G.sel.i;
@@ -641,6 +655,7 @@ function setWLen(m){
   // Обновляем/отвязываем вершину v2 — чтобы длина не откатывалась при перемещении
   detachWallVert(idx,'v2id',nx2,ny2);
   Core.syncWallOpenings(G,w.id);
+  Core.syncWallEquipment(G,w.id);
   rd();
 }
 function setDLen(m){if(!G.sel||G.sel.t!=='door')return;const d=G.doors[G.sel.i],resized=Core.resizeSegmentFromStart(d,m/G.sc);d.x2=resized.x2;d.y2=resized.y2;if(Number.isInteger(d.wallId)){const wall=G.walls.find(w=>w.id===d.wallId);if(wall)Core.syncOpeningToWall(d,wall);}rd();}
@@ -649,7 +664,7 @@ function refresh3d(){if(G.mode==='3d')buildScene3();else rd();}
 function closeP(){G.sel=null;document.getElementById('props').classList.remove('on');rd();}
 function delSel(){
   if(!G.sel)return;savH();
-  if(G.sel.t==='wall'){const wall=G.walls[G.sel.i];if(wall)Core.detachWallOpenings(G,wall.id);G.walls.splice(G.sel.i,1);}
+  if(G.sel.t==='wall'){const wall=G.walls[G.sel.i];if(wall){Core.detachWallOpenings(G,wall.id);Core.detachWallEquipment(G,wall.id);}G.walls.splice(G.sel.i,1);}
   if(G.sel.t==='door')G.doors.splice(G.sel.i,1);
   if(G.sel.t==='window')G.windows.splice(G.sel.i,1);
   if(G.sel.t==='eq')G.equip.splice(G.sel.i,1);
