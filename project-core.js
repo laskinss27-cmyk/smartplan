@@ -34,6 +34,113 @@
     return metersToUnits(DEFAULT_WALL_THICKNESS_METERS, scale);
   }
 
+  function distance2d(x1, y1, x2, y2) {
+    return Math.hypot(
+      finiteNumber(x2, 0) - finiteNumber(x1, 0),
+      finiteNumber(y2, 0) - finiteNumber(y1, 0)
+    );
+  }
+
+  function pointToSegmentDistance2d(px, py, x1, y1, x2, y2) {
+    const ax = finiteNumber(x1, 0);
+    const ay = finiteNumber(y1, 0);
+    const dx = finiteNumber(x2, ax) - ax;
+    const dy = finiteNumber(y2, ay) - ay;
+    const lengthSquared = dx * dx + dy * dy;
+    const t = lengthSquared > 0
+      ? Math.max(0, Math.min(1, ((finiteNumber(px, ax) - ax) * dx + (finiteNumber(py, ay) - ay) * dy) / lengthSquared))
+      : 0;
+    return distance2d(px, py, ax + t * dx, ay + t * dy);
+  }
+
+  function resizeSegmentFromStart(segment, lengthValue) {
+    const x1 = finiteNumber(segment?.x1, 0);
+    const y1 = finiteNumber(segment?.y1, 0);
+    const currentX2 = finiteNumber(segment?.x2, x1);
+    const currentY2 = finiteNumber(segment?.y2, y1);
+    const length = Math.max(0, finiteNumber(lengthValue, 0));
+    const angle = Math.atan2(currentY2 - y1, currentX2 - x1);
+    return {
+      x1,
+      y1,
+      x2: x1 + Math.cos(angle) * length,
+      y2: y1 + Math.sin(angle) * length
+    };
+  }
+
+  function syncWallFromVertices(wall, vertices) {
+    if (!wall || !Array.isArray(vertices)) return wall;
+    const v1 = vertices.find((vertex) => vertex.id === wall.v1id);
+    const v2 = vertices.find((vertex) => vertex.id === wall.v2id);
+    if (v1) {
+      wall.x1 = v1.x;
+      wall.y1 = v1.y;
+    }
+    if (v2) {
+      wall.x2 = v2.x;
+      wall.y2 = v2.y;
+    }
+    return wall;
+  }
+
+  function allocateVertexId(project) {
+    const vertices = Array.isArray(project.verts) ? project.verts : (project.verts = []);
+    const used = new Set(vertices.map((vertex) => vertex.id));
+    let next = Number.isInteger(project.nextVid) && project.nextVid > 0
+      ? project.nextVid
+      : vertices.reduce((max, vertex) => Number.isInteger(vertex.id) ? Math.max(max, vertex.id + 1) : max, 1);
+    while (used.has(next)) next += 1;
+    project.nextVid = next + 1;
+    return next;
+  }
+
+  function detachWallEndpoint(project, wallIndex, endpointKey, xValue, yValue) {
+    if (!project || !Array.isArray(project.walls) || !['v1id', 'v2id'].includes(endpointKey)) return null;
+    const wall = project.walls[wallIndex];
+    if (!wall) return null;
+    if (!Array.isArray(project.verts)) project.verts = [];
+    const isFirst = endpointKey === 'v1id';
+    const x = finiteNumber(xValue, finiteNumber(wall[isFirst ? 'x1' : 'x2'], 0));
+    const y = finiteNumber(yValue, finiteNumber(wall[isFirst ? 'y1' : 'y2'], 0));
+    const vertexId = wall[endpointKey];
+    const vertex = project.verts.find((item) => item.id === vertexId);
+    const shared = project.walls.some((other, index) => (
+      index !== wallIndex && (other.v1id === vertexId || other.v2id === vertexId)
+    ));
+
+    if (shared || !vertex) {
+      const replacement = { id: allocateVertexId(project), x, y };
+      project.verts.push(replacement);
+      wall[endpointKey] = replacement.id;
+    } else {
+      vertex.x = x;
+      vertex.y = y;
+    }
+    syncWallFromVertices(wall, project.verts);
+    return wall[endpointKey];
+  }
+
+  function detachWallVertices(project, wallIndex) {
+    if (!project || !Array.isArray(project.walls)) return null;
+    const wall = project.walls[wallIndex];
+    if (!wall) return null;
+    detachWallEndpoint(project, wallIndex, 'v1id', wall.x1, wall.y1);
+    detachWallEndpoint(project, wallIndex, 'v2id', wall.x2, wall.y2);
+    return wall;
+  }
+
+  function removeUnusedWallVertices(project) {
+    if (!project || !Array.isArray(project.verts) || !Array.isArray(project.walls)) return 0;
+    const used = new Set();
+    project.walls.forEach((wall) => {
+      if (wall.v1id != null) used.add(wall.v1id);
+      if (wall.v2id != null) used.add(wall.v2id);
+    });
+    const before = project.verts.length;
+    project.verts = project.verts.filter((vertex) => used.has(vertex.id));
+    return before - project.verts.length;
+  }
+
   function scenePresetConfig(value, scaleValue = DEFAULT_SCALE) {
     const scale = normalizeScale(scaleValue);
     if (value === 'architectural') {
@@ -344,6 +451,13 @@
     metersToUnits,
     unitsToMeters,
     defaultWallThicknessUnits,
+    distance2d,
+    pointToSegmentDistance2d,
+    resizeSegmentFromStart,
+    syncWallFromVertices,
+    detachWallEndpoint,
+    detachWallVertices,
+    removeUnusedWallVertices,
     scenePresetConfig,
     escapeHtml,
     validateProjectData,

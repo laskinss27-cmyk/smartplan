@@ -13,7 +13,7 @@ window.addEventListener('resize',rsz);setTimeout(rsz,0);
 
 const sn=v=>G.snap?Math.round(v/G.gs)*G.gs:v;
 const s2w=(sx,sy)=>({x:(sx-G.pan.x)/G.zoom,y:(sy-G.pan.y)/G.zoom});
-const L=(x1,y1,x2,y2)=>Math.sqrt((x2-x1)**2+(y2-y1)**2);
+const L=Core.distance2d;
 const px2m=px=>(px*G.sc).toFixed(2);
 const escHtml=Core.escapeHtml;
 const wallThicknessUnits=w=>Number.isFinite(w?.th)?w.th:Core.defaultWallThicknessUnits(G.sc);
@@ -45,10 +45,7 @@ function getOrCreateVert(wx,wy){
 
 // Обновить x1/y1/x2/y2 у стены из вершин
 function syncWallCoords(w){
-  const v1=G.verts.find(v=>v.id===w.v1id);
-  const v2=G.verts.find(v=>v.id===w.v2id);
-  if(v1){w.x1=v1.x;w.y1=v1.y;}
-  if(v2){w.x2=v2.x;w.y2=v2.y;}
+  Core.syncWallFromVertices(w,G.verts);
 }
 function syncAllWalls(){G.walls.forEach(syncWallCoords);}
 
@@ -65,39 +62,17 @@ function migrateWalls(){
 
 // Удалить вершины без ссылок
 function cleanVerts(){
-  const used=new Set();
-  G.walls.forEach(w=>{used.add(w.v1id);used.add(w.v2id);});
-  G.verts=G.verts.filter(v=>used.has(v.id));
+  Core.removeUnusedWallVertices(G);
 }
 
 // Отвязать одну вершину стены от соседей (создать приватную копию)
 function detachWallVert(wIdx, key, nx, ny){
-  const w=G.walls[wIdx];
-  const vid=w[key];
-  const shared=G.walls.some((ow,oi)=>oi!==wIdx&&(ow.v1id===vid||ow.v2id===vid));
-  if(shared){
-    const nv={id:G.nextVid++,x:nx,y:ny};
-    G.verts.push(nv);
-    w[key]=nv.id;
-  } else {
-    const v=G.verts.find(v=>v.id===vid);
-    if(v){v.x=nx;v.y=ny;}
-  }
+  Core.detachWallEndpoint(G,wIdx,key,nx,ny);
 }
 
 // Полностью отвязать стену от общих вершин перед перемещением
 function detachWallFull(wIdx){
-  const w=G.walls[wIdx];
-  ['v1id','v2id'].forEach(key=>{
-    const vid=w[key];
-    const shared=G.walls.some((ow,oi)=>oi!==wIdx&&(ow.v1id===vid||ow.v2id===vid));
-    if(shared){
-      const vold=G.verts.find(v=>v.id===vid);
-      const nv={id:G.nextVid++,x:vold?vold.x:w[key==='v1id'?'x1':'x2'],y:vold?vold.y:w[key==='v1id'?'y1':'y2']};
-      G.verts.push(nv);
-      w[key]=nv.id;
-    }
-  });
+  Core.detachWallVertices(G,wIdx);
 }
 
 // ── VERTEX DRAG STATE ──
@@ -108,10 +83,7 @@ const VD={
   dx:0,dy:0,  // смещение при перетаскивании стены
 };
 
-const dSeg=(px,py,ax,ay,bx,by)=>{
-  const dx=bx-ax,dy=by-ay,t=Math.max(0,Math.min(1,((px-ax)*dx+(py-ay)*dy)/(dx*dx+dy*dy)||0));
-  return L(px,py,ax+t*dx,ay+t*dy);
-};
+const dSeg=Core.pointToSegmentDistance2d;
 function hRGB(h){return `${parseInt(h.slice(1,3),16)},${parseInt(h.slice(3,5),16)},${parseInt(h.slice(5,7),16)}`;}
 
 function rd(){
@@ -648,17 +620,16 @@ function setWLen(m){
   if(!G.sel||G.sel.t!=='wall')return;
   const idx=G.sel.i;
   const w=G.walls[idx];
-  const px=m/G.sc;
-  const ang=Math.atan2(w.y2-w.y1,w.x2-w.x1);
-  const nx2=w.x1+Math.cos(ang)*px;
-  const ny2=w.y1+Math.sin(ang)*px;
+  const resized=Core.resizeSegmentFromStart(w,m/G.sc);
+  const nx2=resized.x2;
+  const ny2=resized.y2;
   w.x2=nx2; w.y2=ny2;
   // Обновляем/отвязываем вершину v2 — чтобы длина не откатывалась при перемещении
   detachWallVert(idx,'v2id',nx2,ny2);
   rd();
 }
-function setDLen(m){if(!G.sel||G.sel.t!=='door')return;const d=G.doors[G.sel.i],px=m/G.sc,ang=Math.atan2(d.y2-d.y1,d.x2-d.x1);d.x2=d.x1+Math.cos(ang)*px;d.y2=d.y1+Math.sin(ang)*px;rd();}
-function setWinLen(m){if(!G.sel||G.sel.t!=='window')return;const w=G.windows[G.sel.i],px=m/G.sc,ang=Math.atan2(w.y2-w.y1,w.x2-w.x1);w.x2=w.x1+Math.cos(ang)*px;w.y2=w.y1+Math.sin(ang)*px;rd();}
+function setDLen(m){if(!G.sel||G.sel.t!=='door')return;const d=G.doors[G.sel.i],resized=Core.resizeSegmentFromStart(d,m/G.sc);d.x2=resized.x2;d.y2=resized.y2;rd();}
+function setWinLen(m){if(!G.sel||G.sel.t!=='window')return;const w=G.windows[G.sel.i],resized=Core.resizeSegmentFromStart(w,m/G.sc);w.x2=resized.x2;w.y2=resized.y2;rd();}
 function refresh3d(){if(G.mode==='3d')buildScene3();else rd();}
 function closeP(){G.sel=null;document.getElementById('props').classList.remove('on');rd();}
 function delSel(){

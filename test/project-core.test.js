@@ -9,6 +9,63 @@ test('default wall thickness is 20 cm at every drawing scale', () => {
   }
 });
 
+test('2D geometry measures segments and resizes them without changing direction', () => {
+  assert.equal(Core.distance2d(0, 0, 3, 4), 5);
+  assert.equal(Core.pointToSegmentDistance2d(5, 3, 0, 0, 10, 0), 3);
+  assert.deepEqual(Core.resizeSegmentFromStart({ x1: 2, y1: 4, x2: 5, y2: 8 }, 10), {
+    x1: 2,
+    y1: 4,
+    x2: 8,
+    y2: 12
+  });
+});
+
+test('detaching a shared wall endpoint preserves the neighbouring wall', () => {
+  const project = {
+    nextVid: 4,
+    verts: [
+      { id: 1, x: 0, y: 0 },
+      { id: 2, x: 10, y: 0 },
+      { id: 3, x: 10, y: 10 }
+    ],
+    walls: [
+      { v1id: 1, v2id: 2, x1: 0, y1: 0, x2: 10, y2: 0 },
+      { v1id: 2, v2id: 3, x1: 10, y1: 0, x2: 10, y2: 10 }
+    ]
+  };
+
+  Core.detachWallEndpoint(project, 0, 'v2id', 8, 0);
+
+  assert.equal(project.walls[0].v2id, 4);
+  assert.deepEqual(project.verts.find((vertex) => vertex.id === 4), { id: 4, x: 8, y: 0 });
+  assert.equal(project.walls[0].x2, 8);
+  assert.equal(project.walls[1].v1id, 2);
+  assert.deepEqual(project.verts.find((vertex) => vertex.id === 2), { id: 2, x: 10, y: 0 });
+});
+
+test('detaching and cleaning wall vertices keeps topology internally consistent', () => {
+  const project = {
+    nextVid: 5,
+    verts: [
+      { id: 1, x: 0, y: 0 },
+      { id: 2, x: 10, y: 0 },
+      { id: 3, x: 0, y: 10 },
+      { id: 4, x: 99, y: 99 }
+    ],
+    walls: [
+      { v1id: 1, v2id: 2, x1: 0, y1: 0, x2: 10, y2: 0 },
+      { v1id: 1, v2id: 3, x1: 0, y1: 0, x2: 0, y2: 10 }
+    ]
+  };
+
+  Core.detachWallVertices(project, 0);
+  assert.equal(project.walls[0].v1id, 5);
+  assert.equal(project.walls[0].v2id, 2);
+  assert.equal(Core.removeUnusedWallVertices(project), 1);
+  assert.equal(project.verts.some((vertex) => vertex.id === 4), false);
+  assert.equal(project.verts.some((vertex) => vertex.id === project.walls[0].v1id), true);
+});
+
 test('architectural scene preset has a scale-aware atmosphere', () => {
   const preset = Core.scenePresetConfig('architectural', 0.1);
   assert.equal(preset.id, 'architectural');
