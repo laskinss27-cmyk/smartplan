@@ -8,7 +8,7 @@
   const DEFAULT_SCALE = 0.1;
   const DEFAULT_SNAP_METERS = 0.25;
   const DEFAULT_WALL_THICKNESS_METERS = 0.2;
-  const CURRENT_MODEL_REVISION = 3;
+  const CURRENT_MODEL_REVISION = 4;
   const MAX_PROJECT_ITEMS = 100000;
   const MAX_PROJECT_NODES = 500000;
   const MAX_STRING_LENGTH = 2 * 1024 * 1024;
@@ -216,6 +216,50 @@
       }
     }));
     return project;
+  }
+
+  function normalizeWallConnections(project, toleranceValue) {
+    if (!project || !Array.isArray(project.verts) || !Array.isArray(project.walls)) return 0;
+    const tolerance = Math.max(1e-9, finiteNumber(toleranceValue, metersToUnits(0.001, project.sc)));
+    const buckets = new Map();
+    const replacementIds = new Map();
+    const referencedIds = new Set();
+    project.walls.forEach((wall) => {
+      if (wall.v1id != null) referencedIds.add(wall.v1id);
+      if (wall.v2id != null) referencedIds.add(wall.v2id);
+    });
+
+    const bucketKey = (floor, cellX, cellY) => `${floor}:${cellX}:${cellY}`;
+    project.verts.forEach((vertex) => {
+      if (!referencedIds.has(vertex.id)) return;
+      const floor = normalizeFloor(vertex.floor);
+      vertex.floor = floor;
+      const cellX = Math.floor(vertex.x / tolerance);
+      const cellY = Math.floor(vertex.y / tolerance);
+      let canonical = null;
+      for (let dx = -1; dx <= 1 && !canonical; dx += 1) {
+        for (let dy = -1; dy <= 1 && !canonical; dy += 1) {
+          const candidates = buckets.get(bucketKey(floor, cellX + dx, cellY + dy)) || [];
+          canonical = candidates.find((candidate) => distance2d(vertex.x, vertex.y, candidate.x, candidate.y) <= tolerance) || null;
+        }
+      }
+      if (canonical) {
+        replacementIds.set(vertex.id, canonical.id);
+      } else {
+        const key = bucketKey(floor, cellX, cellY);
+        if (!buckets.has(key)) buckets.set(key, []);
+        buckets.get(key).push(vertex);
+      }
+    });
+
+    if (!replacementIds.size) return 0;
+    project.walls.forEach((wall) => {
+      if (replacementIds.has(wall.v1id)) wall.v1id = replacementIds.get(wall.v1id);
+      if (replacementIds.has(wall.v2id)) wall.v2id = replacementIds.get(wall.v2id);
+      syncWallFromVertices(wall, project.verts);
+    });
+    removeUnusedWallVertices(project);
+    return replacementIds.size;
   }
 
   function scenePresetConfig(value, scaleValue = DEFAULT_SCALE) {
@@ -526,6 +570,7 @@
       });
     }
     if ((data.modelRevision || 0) < 3) migrateWallTopology(data);
+    if ((data.modelRevision || 0) < 4) normalizeWallConnections(data);
     data.modelRevision = CURRENT_MODEL_REVISION;
     return data;
   }
@@ -547,6 +592,7 @@
     detachWallVertices,
     removeUnusedWallVertices,
     migrateWallTopology,
+    normalizeWallConnections,
     scenePresetConfig,
     escapeHtml,
     validateProjectData,

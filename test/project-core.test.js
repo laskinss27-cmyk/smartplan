@@ -151,6 +151,31 @@ test('topology migration assigns stable wall IDs and separates floors', () => {
   assert.equal(JSON.stringify(data), serialized);
 });
 
+test('connection normalization merges coincident vertices only on the same floor', () => {
+  const project = {
+    sc: 0.1,
+    verts: [
+      { id: 1, x: 10, y: 10, floor: 1 },
+      { id: 2, x: 10.005, y: 10, floor: 1 },
+      { id: 3, x: 10, y: 10, floor: 2 },
+      { id: 4, x: 20, y: 10, floor: 1 },
+      { id: 5, x: 20, y: 20, floor: 1 },
+      { id: 6, x: 20, y: 10, floor: 2 }
+    ],
+    walls: [
+      { v1id: 1, v2id: 4, x1: 10, y1: 10, x2: 20, y2: 10, floor: 1 },
+      { v1id: 2, v2id: 5, x1: 10.005, y1: 10, x2: 20, y2: 20, floor: 1 },
+      { v1id: 3, v2id: 6, x1: 10, y1: 10, x2: 20, y2: 10, floor: 2 }
+    ]
+  };
+
+  assert.equal(Core.normalizeWallConnections(project), 1);
+  assert.equal(project.walls[0].v1id, project.walls[1].v1id);
+  assert.notEqual(project.walls[0].v1id, project.walls[2].v1id);
+  assert.equal(project.verts.some((vertex) => vertex.id === 2), false);
+  assert.equal(Core.normalizeWallConnections(project), 0);
+});
+
 test('cable routing prefers stable wall IDs after walls are reordered', () => {
   const walls = [
     { id: 20, x1: 100, y1: 0, x2: 100, y2: 100, floor: 1 },
