@@ -8,7 +8,7 @@
   const DEFAULT_SCALE = 0.1;
   const DEFAULT_SNAP_METERS = 0.25;
   const DEFAULT_WALL_THICKNESS_METERS = 0.2;
-  const CURRENT_MODEL_REVISION = 4;
+  const CURRENT_MODEL_REVISION = 5;
   const MAX_PROJECT_ITEMS = 100000;
   const MAX_PROJECT_NODES = 500000;
   const MAX_STRING_LENGTH = 2 * 1024 * 1024;
@@ -52,6 +52,20 @@
       ? Math.max(0, Math.min(1, ((finiteNumber(px, ax) - ax) * dx + (finiteNumber(py, ay) - ay) * dy) / lengthSquared))
       : 0;
     return distance2d(px, py, ax + t * dx, ay + t * dy);
+  }
+
+  function projectPointToSegment2d(px, py, segment) {
+    const x1 = finiteNumber(segment?.x1, 0);
+    const y1 = finiteNumber(segment?.y1, 0);
+    const dx = finiteNumber(segment?.x2, x1) - x1;
+    const dy = finiteNumber(segment?.y2, y1) - y1;
+    const lengthSquared = dx * dx + dy * dy;
+    const t = lengthSquared > 0
+      ? Math.max(0, Math.min(1, ((finiteNumber(px, x1) - x1) * dx + (finiteNumber(py, y1) - y1) * dy) / lengthSquared))
+      : 0;
+    const x = x1 + t * dx;
+    const y = y1 + t * dy;
+    return { x, y, t, distance: distance2d(px, py, x, y) };
   }
 
   function resizeSegmentFromStart(segment, lengthValue) {
@@ -260,6 +274,99 @@
     });
     removeUnusedWallVertices(project);
     return replacementIds.size;
+  }
+
+  function attachOpeningToNearestWall(opening, walls, options = {}) {
+    if (!opening || !Array.isArray(walls)) return null;
+    const floor = normalizeFloor(opening.floor);
+    const openingDx = finiteNumber(opening.x2, 0) - finiteNumber(opening.x1, 0);
+    const openingDy = finiteNumber(opening.y2, 0) - finiteNumber(opening.y1, 0);
+    const openingLength = Math.hypot(openingDx, openingDy);
+    if (openingLength <= 1e-9) return null;
+    const centerX = (opening.x1 + opening.x2) / 2;
+    const centerY = (opening.y1 + opening.y2) / 2;
+    const maxDistance = Math.max(0, finiteNumber(options.maxDistance, metersToUnits(0.3, options.scale)));
+    const minimumAlignment = Math.cos(Math.max(0, finiteNumber(options.angleTolerance, 0.35)));
+    let best = null;
+
+    walls.forEach((wall) => {
+      if (!Number.isInteger(wall.id) || normalizeFloor(wall.floor) !== floor) return;
+      const wallDx = wall.x2 - wall.x1;
+      const wallDy = wall.y2 - wall.y1;
+      const wallLength = Math.hypot(wallDx, wallDy);
+      if (wallLength <= 1e-9) return;
+      const alignment = (openingDx * wallDx + openingDy * wallDy) / (openingLength * wallLength);
+      if (Math.abs(alignment) < minimumAlignment) return;
+      const projection = projectPointToSegment2d(centerX, centerY, wall);
+      if (projection.distance > maxDistance || (best && projection.distance >= best.distance)) return;
+      best = { wall, projection, distance: projection.distance, direction: alignment >= 0 ? 1 : -1 };
+    });
+
+    if (!best) return null;
+    opening.floor = floor;
+    opening.wallId = best.wall.id;
+    opening.wallPosition = best.projection.t;
+    opening.wallDirection = best.direction;
+    return best.wall.id;
+  }
+
+  function syncOpeningToWall(opening, wall) {
+    if (!opening || !wall || opening.wallId !== wall.id) return false;
+    const wallDx = wall.x2 - wall.x1;
+    const wallDy = wall.y2 - wall.y1;
+    const wallLength = Math.hypot(wallDx, wallDy);
+    const openingLength = distance2d(opening.x1, opening.y1, opening.x2, opening.y2);
+    if (wallLength <= 1e-9 || openingLength <= 1e-9) return false;
+    const ux = wallDx / wallLength;
+    const uy = wallDy / wallLength;
+    const half = openingLength / 2;
+    let centerDistance = Math.max(0, Math.min(1, finiteNumber(opening.wallPosition, 0.5))) * wallLength;
+    if (openingLength <= wallLength) centerDistance = Math.max(half, Math.min(wallLength - half, centerDistance));
+    else centerDistance = wallLength / 2;
+    const centerX = wall.x1 + ux * centerDistance;
+    const centerY = wall.y1 + uy * centerDistance;
+    const direction = opening.wallDirection === -1 ? -1 : 1;
+    opening.x1 = centerX - ux * half * direction;
+    opening.y1 = centerY - uy * half * direction;
+    opening.x2 = centerX + ux * half * direction;
+    opening.y2 = centerY + uy * half * direction;
+    opening.wallPosition = centerDistance / wallLength;
+    opening.floor = normalizeFloor(wall.floor);
+    return true;
+  }
+
+  function syncWallOpenings(project, wallId) {
+    if (!project || !Array.isArray(project.walls)) return 0;
+    const wall = project.walls.find((item) => item.id === wallId);
+    if (!wall) return 0;
+    let updated = 0;
+    ['doors', 'windows'].forEach((collection) => (project[collection] || []).forEach((opening) => {
+      if (syncOpeningToWall(opening, wall)) updated += 1;
+    }));
+    return updated;
+  }
+
+  function detachWallOpenings(project, wallId) {
+    let detached = 0;
+    ['doors', 'windows'].forEach((collection) => (project?.[collection] || []).forEach((opening) => {
+      if (opening.wallId !== wallId) return;
+      delete opening.wallId;
+      delete opening.wallPosition;
+      delete opening.wallDirection;
+      detached += 1;
+    }));
+    return detached;
+  }
+
+  function migrateOpeningAttachments(project) {
+    if (!project || !Array.isArray(project.walls)) return project;
+    const options = { scale: project.sc, maxDistance: metersToUnits(0.3, project.sc), angleTolerance: 0.35 };
+    ['doors', 'windows'].forEach((collection) => (project[collection] || []).forEach((opening) => {
+      if (!Number.isInteger(opening.wallId) || !project.walls.some((wall) => wall.id === opening.wallId)) {
+        attachOpeningToNearestWall(opening, project.walls, options);
+      }
+    }));
+    return project;
   }
 
   function scenePresetConfig(value, scaleValue = DEFAULT_SCALE) {
@@ -571,6 +678,7 @@
     }
     if ((data.modelRevision || 0) < 3) migrateWallTopology(data);
     if ((data.modelRevision || 0) < 4) normalizeWallConnections(data);
+    if ((data.modelRevision || 0) < 5) migrateOpeningAttachments(data);
     data.modelRevision = CURRENT_MODEL_REVISION;
     return data;
   }
@@ -586,6 +694,7 @@
     defaultWallThicknessUnits,
     distance2d,
     pointToSegmentDistance2d,
+    projectPointToSegment2d,
     resizeSegmentFromStart,
     syncWallFromVertices,
     detachWallEndpoint,
@@ -593,6 +702,11 @@
     removeUnusedWallVertices,
     migrateWallTopology,
     normalizeWallConnections,
+    attachOpeningToNearestWall,
+    syncOpeningToWall,
+    syncWallOpenings,
+    detachWallOpenings,
+    migrateOpeningAttachments,
     scenePresetConfig,
     escapeHtml,
     validateProjectData,

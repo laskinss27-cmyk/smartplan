@@ -142,6 +142,7 @@ function buildScene3(){
     // Collect doors and windows that belong to this wall (same floor, nearest wall only)
     const proxFilter=(arr,wIdx)=>arr.filter(d=>{
       if((d.floor||1)!==wFloor)return false;
+      if(Number.isInteger(d.wallId))return d.wallId===w.id;
       const da=Math.atan2(d.y2-d.y1,d.x2-d.x1);
       const diff=Math.abs(((da-ang+Math.PI*3)%(Math.PI*2))-Math.PI);
       if(diff>0.35&&Math.abs(diff-Math.PI)>0.35)return false;
@@ -167,16 +168,16 @@ function buildScene3(){
     } else {
       const openings=[];
       wallDoors.forEach(d=>{
-        const dx=d.x1-w.x1,dz=d.y1-w.y1;
-        const t=dx*wDir.x+dz*wDir.z;
-        openings.push({t,len:L(d.x1,d.y1,d.x2,d.y2),type:'door',dh:d.dh!=null?d.dh:dh3d()});
+        const t1=(d.x1-w.x1)*wDir.x+(d.y1-w.y1)*wDir.z;
+        const t2=(d.x2-w.x1)*wDir.x+(d.y2-w.y1)*wDir.z;
+        openings.push({t:Math.min(t1,t2),len:L(d.x1,d.y1,d.x2,d.y2),type:'door',dh:d.dh!=null?d.dh:dh3d()});
       });
       wallWindows.forEach(wi=>{
-        const dx=wi.x1-w.x1,dz=wi.y1-w.y1;
-        const t=dx*wDir.x+dz*wDir.z;
+        const t1=(wi.x1-w.x1)*wDir.x+(wi.y1-w.y1)*wDir.z;
+        const t2=(wi.x2-w.x1)*wDir.x+(wi.y2-w.y1)*wDir.z;
         const sill=wi.sill!=null?wi.sill:0.9/G.sc;
         const wiH=wi.wh!=null?wi.wh:1.4/G.sc;
-        openings.push({t,len:L(wi.x1,wi.y1,wi.x2,wi.y2),type:'window',sill,wiH});
+        openings.push({t:Math.min(t1,t2),len:L(wi.x1,wi.y1,wi.x2,wi.y2),type:'window',sill,wiH});
       });
       openings.sort((a,b)=>a.t-b.t);
       let prev=0;

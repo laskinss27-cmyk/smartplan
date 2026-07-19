@@ -176,6 +176,67 @@ test('connection normalization merges coincident vertices only on the same floor
   assert.equal(Core.normalizeWallConnections(project), 0);
 });
 
+test('opening attachment follows its wall while preserving width and position', () => {
+  const wall = { id: 10, x1: 0, y1: 0, x2: 100, y2: 0, floor: 1 };
+  const door = { x1: 30, y1: 2, x2: 50, y2: 2, floor: 1 };
+
+  assert.equal(Core.attachOpeningToNearestWall(door, [wall], { maxDistance: 5 }), 10);
+  assert.equal(door.wallPosition, 0.4);
+  wall.x1 = 20;
+  wall.y1 = 10;
+  wall.x2 = 20;
+  wall.y2 = 110;
+  assert.equal(Core.syncOpeningToWall(door, wall), true);
+  assert.equal(Core.distance2d(door.x1, door.y1, door.x2, door.y2), 20);
+  assert.deepEqual({ x1: door.x1, y1: door.y1, x2: door.x2, y2: door.y2 }, { x1: 20, y1: 40, x2: 20, y2: 60 });
+});
+
+test('opening attachment refuses distant, perpendicular, and other-floor walls', () => {
+  const walls = [
+    { id: 1, x1: 0, y1: 0, x2: 100, y2: 0, floor: 1 },
+    { id: 2, x1: 0, y1: 20, x2: 100, y2: 20, floor: 2 }
+  ];
+  assert.equal(Core.attachOpeningToNearestWall({ x1: 10, y1: 20, x2: 30, y2: 20, floor: 1 }, walls, { maxDistance: 5 }), null);
+  assert.equal(Core.attachOpeningToNearestWall({ x1: 20, y1: -5, x2: 20, y2: 5, floor: 1 }, walls, { maxDistance: 5 }), null);
+  assert.equal(Core.attachOpeningToNearestWall({ x1: 10, y1: 20, x2: 30, y2: 20, floor: 2 }, walls, { maxDistance: 5 }), 2);
+});
+
+test('opening migration binds confident matches and leaves remote openings free', () => {
+  const data = {
+    version: 3,
+    modelRevision: 4,
+    sc: 0.1,
+    verts: [{ id: 1, x: 0, y: 0, floor: 1 }, { id: 2, x: 100, y: 0, floor: 1 }],
+    walls: [{ id: 7, v1id: 1, v2id: 2, x1: 0, y1: 0, x2: 100, y2: 0, floor: 1 }],
+    doors: [
+      { x1: 20, y1: 1, x2: 40, y2: 1, floor: 1 },
+      { x1: 20, y1: 50, x2: 40, y2: 50, floor: 1 }
+    ],
+    windows: []
+  };
+
+  Core.migrateLegacyDefaults(data);
+  assert.equal(data.doors[0].wallId, 7);
+  assert.equal(data.doors[1].wallId, undefined);
+  assert.equal(data.modelRevision, Core.CURRENT_MODEL_REVISION);
+});
+
+test('deleting a wall detaches its openings without moving them', () => {
+  const project = {
+    doors: [{ x1: 10, y1: 0, x2: 20, y2: 0, wallId: 3, wallPosition: 0.15, wallDirection: 1 }],
+    windows: [{ x1: 30, y1: 0, x2: 40, y2: 0, wallId: 3, wallPosition: 0.35, wallDirection: 1 }]
+  };
+  const before = JSON.stringify({ doors: project.doors, windows: project.windows });
+  assert.equal(Core.detachWallOpenings(project, 3), 2);
+  assert.equal(project.doors[0].wallId, undefined);
+  assert.equal(project.windows[0].wallId, undefined);
+  const coordinatesAfter = JSON.parse(JSON.stringify({ doors: project.doors, windows: project.windows }));
+  const coordinatesBefore = JSON.parse(before);
+  delete coordinatesBefore.doors[0].wallId;delete coordinatesBefore.doors[0].wallPosition;delete coordinatesBefore.doors[0].wallDirection;
+  delete coordinatesBefore.windows[0].wallId;delete coordinatesBefore.windows[0].wallPosition;delete coordinatesBefore.windows[0].wallDirection;
+  assert.deepEqual(coordinatesAfter, coordinatesBefore);
+});
+
 test('cable routing prefers stable wall IDs after walls are reordered', () => {
   const walls = [
     { id: 20, x1: 100, y1: 0, x2: 100, y2: 100, floor: 1 },

@@ -50,6 +50,17 @@ function addWallBetween(v1,v2){
   return G.walls.length-1;
 }
 
+function addOpeningBetween(collection,start,end,extra){
+  const opening={x1:start.x,y1:start.y,x2:end.x,y2:end.y,floor:G.floor,...extra};
+  const wallId=Core.attachOpeningToNearestWall(opening,G.walls,{scale:G.sc,maxDistance:Core.metersToUnits(0.3,G.sc)});
+  if(Number.isInteger(wallId)){
+    const wall=G.walls.find(w=>w.id===wallId);
+    if(wall)Core.syncOpeningToWall(opening,wall);
+  }
+  collection.push(opening);
+  return collection.length-1;
+}
+
 // Обновить x1/y1/x2/y2 у стены из вершин
 function syncWallCoords(w){
   Core.syncWallFromVertices(w,G.verts);
@@ -357,7 +368,9 @@ cv.addEventListener('mousemove',e=>{
       // Snap к другим вершинам
       const near=G.verts.find(ov=>ov.id!==v.id&&Math.sqrt((ov.x-wx)**2+(ov.y-wy)**2)<VSNAP/G.zoom);
       if(near){v.x=near.x;v.y=near.y;}
-      syncAllWalls();rd();
+      syncAllWalls();
+      G.walls.forEach(w=>Core.syncWallOpenings(G,w.id));
+      rd();
     }
     return;
   }
@@ -370,7 +383,7 @@ cv.addEventListener('mousemove',e=>{
       // Снапим только v1, v2 = v1 + исходный вектор → длина стены не меняется
       v1.x=sn(wx+VD.ox1);v1.y=sn(wy+VD.oy1);
       v2.x=v1.x+VD.wdx;v2.y=v1.y+VD.wdy;
-      syncAllWalls();rd();
+      syncAllWalls();Core.syncWallOpenings(G,w.id);rd();
     }
     return;
   }
@@ -432,12 +445,10 @@ cv.addEventListener('mousedown',e=>{
           const wi=addWallBetween(v1,v2);
           G.sel={t:'wall',i:wi}; showP('wall',wi);
         } else if(G.tool==='door'){
-          const di=G.doors.length;
-          G.doors.push({x1:s.x,y1:s.y,x2:en.x,y2:en.y,dh:null,floor:G.floor});
+          const di=addOpeningBetween(G.doors,s,en,{dh:null});
           G.sel={t:'door',i:di}; showP('door',di);
         } else {
-          const wni=G.windows.length;
-          G.windows.push({x1:s.x,y1:s.y,x2:en.x,y2:en.y,wh:null,sill:null,floor:G.floor});
+          const wni=addOpeningBetween(G.windows,s,en,{wh:null,sill:null});
           G.sel={t:'window',i:wni}; showP('window',wni);
         }
         G.drawS={x:en.x,y:en.y};G.drawC={x:en.x,y:en.y};
@@ -470,12 +481,10 @@ cv.addEventListener('mouseup',e=>{
         const wi=addWallBetween(v1,v2);
         G.sel={t:'wall',i:wi};showP('wall',wi);
       } else if(G.tool==='door'){
-        const di=G.doors.length;
-        G.doors.push({x1:st.x,y1:st.y,x2:en.x,y2:en.y,dh:null,floor:G.floor});
+        const di=addOpeningBetween(G.doors,st,en,{dh:null});
         G.sel={t:'door',i:di};showP('door',di);
       } else {
-        const wni=G.windows.length;
-        G.windows.push({x1:st.x,y1:st.y,x2:en.x,y2:en.y,wh:null,sill:null,floor:G.floor});
+        const wni=addOpeningBetween(G.windows,st,en,{wh:null,sill:null});
         G.sel={t:'window',i:wni};showP('window',wni);
       }
     }
@@ -631,15 +640,16 @@ function setWLen(m){
   w.x2=nx2; w.y2=ny2;
   // Обновляем/отвязываем вершину v2 — чтобы длина не откатывалась при перемещении
   detachWallVert(idx,'v2id',nx2,ny2);
+  Core.syncWallOpenings(G,w.id);
   rd();
 }
-function setDLen(m){if(!G.sel||G.sel.t!=='door')return;const d=G.doors[G.sel.i],resized=Core.resizeSegmentFromStart(d,m/G.sc);d.x2=resized.x2;d.y2=resized.y2;rd();}
-function setWinLen(m){if(!G.sel||G.sel.t!=='window')return;const w=G.windows[G.sel.i],resized=Core.resizeSegmentFromStart(w,m/G.sc);w.x2=resized.x2;w.y2=resized.y2;rd();}
+function setDLen(m){if(!G.sel||G.sel.t!=='door')return;const d=G.doors[G.sel.i],resized=Core.resizeSegmentFromStart(d,m/G.sc);d.x2=resized.x2;d.y2=resized.y2;if(Number.isInteger(d.wallId)){const wall=G.walls.find(w=>w.id===d.wallId);if(wall)Core.syncOpeningToWall(d,wall);}rd();}
+function setWinLen(m){if(!G.sel||G.sel.t!=='window')return;const w=G.windows[G.sel.i],resized=Core.resizeSegmentFromStart(w,m/G.sc);w.x2=resized.x2;w.y2=resized.y2;if(Number.isInteger(w.wallId)){const wall=G.walls.find(q=>q.id===w.wallId);if(wall)Core.syncOpeningToWall(w,wall);}rd();}
 function refresh3d(){if(G.mode==='3d')buildScene3();else rd();}
 function closeP(){G.sel=null;document.getElementById('props').classList.remove('on');rd();}
 function delSel(){
   if(!G.sel)return;savH();
-  if(G.sel.t==='wall')G.walls.splice(G.sel.i,1);
+  if(G.sel.t==='wall'){const wall=G.walls[G.sel.i];if(wall)Core.detachWallOpenings(G,wall.id);G.walls.splice(G.sel.i,1);}
   if(G.sel.t==='door')G.doors.splice(G.sel.i,1);
   if(G.sel.t==='window')G.windows.splice(G.sel.i,1);
   if(G.sel.t==='eq')G.equip.splice(G.sel.i,1);
