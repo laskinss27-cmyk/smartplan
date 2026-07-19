@@ -231,12 +231,12 @@ function registerCustomEqDefinitions(){
 function getProjectData(){
   return {
     version:3,
-    modelRevision:2,
+    modelRevision:Core.CURRENT_MODEL_REVISION,
     verts:G.verts, walls:G.walls, doors:G.doors, windows:G.windows,
     equip:G.equip, measures:G.measures,
     cables:G.cables, comments:G.comments,
     customEq:G.customEq,
-    sc:G.sc, gs:G.gs,
+    sc:G.sc, gs:G.gs, nextWallId:G.nextWallId,
     savedAt:new Date().toISOString()
   };
 }
@@ -257,6 +257,7 @@ function applyProjectData(data){
   G.customEq=data.customEq||[];
   // Восстанавливаем счётчики ID чтобы избежать коллизий
   if(G.verts.length) G.nextVid=Math.max(...G.verts.map(v=>v.id))+1;
+  G.nextWallId=Math.max(data.nextWallId||1,...G.walls.map(w=>(w.id||0)+1));
   let maxId=G.nextId;
   G.equip.forEach(e=>{if(e.id>=maxId)maxId=e.id+1;});
   G.comments.forEach(c=>{if(c.id>=maxId)maxId=c.id+1;});

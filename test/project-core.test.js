@@ -37,7 +37,7 @@ test('detaching a shared wall endpoint preserves the neighbouring wall', () => {
   Core.detachWallEndpoint(project, 0, 'v2id', 8, 0);
 
   assert.equal(project.walls[0].v2id, 4);
-  assert.deepEqual(project.verts.find((vertex) => vertex.id === 4), { id: 4, x: 8, y: 0 });
+  assert.deepEqual(project.verts.find((vertex) => vertex.id === 4), { id: 4, x: 8, y: 0, floor: 1 });
   assert.equal(project.walls[0].x2, 8);
   assert.equal(project.walls[1].v1id, 2);
   assert.deepEqual(project.verts.find((vertex) => vertex.id === 2), { id: 2, x: 10, y: 0 });
@@ -116,9 +116,53 @@ test('legacy default wall thickness migrates to 20 cm once', () => {
   const data = { version: 3, sc: 0.1, walls: [{ th: 8 }] };
   Core.migrateLegacyDefaults(data);
   assert.equal(data.walls[0].th, 2);
-  assert.equal(data.modelRevision, 2);
+  assert.equal(data.modelRevision, Core.CURRENT_MODEL_REVISION);
   Core.migrateLegacyDefaults(data);
   assert.equal(data.walls[0].th, 2);
+});
+
+test('topology migration assigns stable wall IDs and separates floors', () => {
+  const data = {
+    version: 3,
+    modelRevision: 2,
+    nextVid: 4,
+    verts: [
+      { id: 1, x: 0, y: 0 },
+      { id: 2, x: 10, y: 0 },
+      { id: 3, x: 20, y: 0 }
+    ],
+    walls: [
+      { v1id: 1, v2id: 2, x1: 0, y1: 0, x2: 10, y2: 0, floor: 1 },
+      { v1id: 1, v2id: 3, x1: 0, y1: 0, x2: 20, y2: 0, floor: 2 }
+    ],
+    cables: [{ type: 'utp', pts: [{ x: 5, y: 10, z: 0, wallIndex: 0 }] }]
+  };
+
+  Core.migrateLegacyDefaults(data);
+
+  assert.equal(data.modelRevision, Core.CURRENT_MODEL_REVISION);
+  assert.notEqual(data.walls[0].id, data.walls[1].id);
+  assert.notEqual(data.walls[0].v1id, data.walls[1].v1id);
+  assert.equal(data.verts.find((vertex) => vertex.id === data.walls[0].v1id).floor, 1);
+  assert.equal(data.verts.find((vertex) => vertex.id === data.walls[1].v1id).floor, 2);
+  assert.equal(data.cables[0].pts[0].wallId, data.walls[0].id);
+  const serialized = JSON.stringify(data);
+  Core.migrateLegacyDefaults(data);
+  assert.equal(JSON.stringify(data), serialized);
+});
+
+test('cable routing prefers stable wall IDs after walls are reordered', () => {
+  const walls = [
+    { id: 20, x1: 100, y1: 0, x2: 100, y2: 100, floor: 1 },
+    { id: 10, x1: 0, y1: 0, x2: 100, y2: 0, floor: 1 }
+  ];
+  const start = { x: 20, y: 15, z: 3, wallId: 10, wallIndex: 0 };
+  const end = { x: 97, y: 40, z: 60, wallId: 20, wallIndex: 1 };
+
+  const routed = Core.routeCableSegment(start, end, walls, { floor: 1 });
+
+  assert.equal(routed[0].wallId, 10);
+  assert.equal(routed[1].wallId, 20);
 });
 
 test('project validation rejects unsupported and unsafe data', () => {

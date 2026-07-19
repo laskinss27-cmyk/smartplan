@@ -23,9 +23,10 @@ const wallThicknessUnits=w=>Number.isFinite(w?.th)?w.th:Core.defaultWallThicknes
 const VSNAP=14; // px в экранных координатах
 
 // Найти ближайшую вершину в мировых координатах
-function nearVert(wx,wy){
+function nearVert(wx,wy,floor=G.floor){
   let best=null,bestD=999999;
   G.verts.forEach(v=>{
+    if((v.floor||1)!==floor)return;
     const d=Math.sqrt((v.x-wx)**2+(v.y-wy)**2);
     if(d<bestD){bestD=d;best=v;}
   });
@@ -35,12 +36,18 @@ function nearVert(wx,wy){
 }
 
 // Создать вершину или вернуть существующую рядом
-function getOrCreateVert(wx,wy){
-  const existing=nearVert(wx,wy);
+function getOrCreateVert(wx,wy,floor=G.floor){
+  const existing=nearVert(wx,wy,floor);
   if(existing)return existing;
-  const v={id:G.nextVid++,x:sn(wx),y:sn(wy)};
+  const v={id:G.nextVid++,x:sn(wx),y:sn(wy),floor};
   G.verts.push(v);
   return v;
+}
+
+function addWallBetween(v1,v2){
+  const wall={id:G.nextWallId++,v1id:v1.id,v2id:v2.id,x1:v1.x,y1:v1.y,x2:v2.x,y2:v2.y,th:Core.defaultWallThicknessUnits(G.sc),h:null,floor:G.floor};
+  G.walls.push(wall);
+  return G.walls.length-1;
 }
 
 // Обновить x1/y1/x2/y2 у стены из вершин
@@ -53,10 +60,11 @@ function syncAllWalls(){G.walls.forEach(syncWallCoords);}
 function migrateWalls(){
   G.walls.forEach(w=>{
     if(w.v1id==null){
-      const v1=getOrCreateVert(w.x1,w.y1);
-      const v2=getOrCreateVert(w.x2,w.y2);
+      const v1=getOrCreateVert(w.x1,w.y1,w.floor||1);
+      const v2=getOrCreateVert(w.x2,w.y2,w.floor||1);
       w.v1id=v1.id; w.v2id=v2.id;
     }
+    if(!Number.isInteger(w.id))w.id=G.nextWallId++;
   });
 }
 
@@ -421,8 +429,7 @@ cv.addEventListener('mousedown',e=>{
         if(G.tool==='wall'){
           const v1=getOrCreateVert(s.x,s.y);
           const v2=getOrCreateVert(en.x,en.y);
-          const wi=G.walls.length;
-          G.walls.push({v1id:v1.id,v2id:v2.id,x1:v1.x,y1:v1.y,x2:v2.x,y2:v2.y,th:Core.defaultWallThicknessUnits(G.sc),h:null,floor:G.floor});
+          const wi=addWallBetween(v1,v2);
           G.sel={t:'wall',i:wi}; showP('wall',wi);
         } else if(G.tool==='door'){
           const di=G.doors.length;
@@ -460,8 +467,7 @@ cv.addEventListener('mouseup',e=>{
       if(G.tool==='wall'){
         const v1=getOrCreateVert(st.x,st.y);
         const v2=getOrCreateVert(en.x,en.y);
-        const wi=G.walls.length;
-        G.walls.push({v1id:v1.id,v2id:v2.id,x1:v1.x,y1:v1.y,x2:v2.x,y2:v2.y,th:Core.defaultWallThicknessUnits(G.sc),h:null,floor:G.floor});
+        const wi=addWallBetween(v1,v2);
         G.sel={t:'wall',i:wi};showP('wall',wi);
       } else if(G.tool==='door'){
         const di=G.doors.length;
@@ -487,8 +493,7 @@ cv.addEventListener('dblclick',e=>{
     savH();
     const v1=getOrCreateVert(wx-sz/2,wy);
     const v2=getOrCreateVert(wx+sz/2,wy);
-    const wi=G.walls.length;
-    G.walls.push({v1id:v1.id,v2id:v2.id,x1:v1.x,y1:v1.y,x2:v2.x,y2:v2.y,th:Core.defaultWallThicknessUnits(G.sc),h:null,floor:G.floor});
+    const wi=addWallBetween(v1,v2);
     G.drawOn=false;G.drawS=null;G.drawC=null;
     G.sel={t:'wall',i:wi};showP('wall',wi);rd();
   } else if(G.drawOn&&(G.tool==='door'||G.tool==='window')){

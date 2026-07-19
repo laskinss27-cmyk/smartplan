@@ -286,7 +286,9 @@ function addWMesh(sc,wlen,wh,th,ang,mx,my,mz,wallIndex){
     :new THREE.MeshLambertMaterial({color:wallCol});
   const mesh=new THREE.Mesh(geo,mat);
   mesh.position.set(mx,my,mz);mesh.rotation.y=-ang;mesh.castShadow=true;mesh.receiveShadow=true;mesh.name='wall';
-  mesh.userData.wallIndex=wallIndex;sc.add(mesh);
+  mesh.userData.wallIndex=wallIndex;
+  if(Number.isInteger(G.walls[wallIndex]?.id))mesh.userData.wallId=G.walls[wallIndex].id;
+  sc.add(mesh);
   const el=new THREE.LineSegments(new THREE.EdgesGeometry(geo),new THREE.LineBasicMaterial({color:preset.edgeColor,transparent:true,opacity:preset.id==='architectural'?.38:.6}));
   el.position.copy(mesh.position);el.rotation.copy(mesh.rotation);sc.add(el);
 }
@@ -696,7 +698,7 @@ function setup3dEv(el){
         const floor=wallIndex!=null?(G.walls[wallIndex].floor||1):(hasSecondFloor&&p.y>=firstFloorHeight-5?2:1);
         const lockedHeight=G.cablePts.length?G.cablePts[0].y:p.y;
         const newPt={x:p.x,y:lockedHeight,z:p.z,floor};
-        if(wallIndex!=null)newPt.wallIndex=wallIndex;
+        if(wallIndex!=null){newPt.wallIndex=wallIndex;newPt.wallId=G.walls[wallIndex].id;}
         const added=G.cablePts.length>0?routeCablePoints(G.cablePts[G.cablePts.length-1],newPt):[newPt];
         added.forEach(point=>G.cablePts.push(point));
         if(added.length)G.cableStepSizes.push(added.length);

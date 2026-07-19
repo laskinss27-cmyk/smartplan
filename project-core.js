@@ -8,6 +8,7 @@
   const DEFAULT_SCALE = 0.1;
   const DEFAULT_SNAP_METERS = 0.25;
   const DEFAULT_WALL_THICKNESS_METERS = 0.2;
+  const CURRENT_MODEL_REVISION = 3;
   const MAX_PROJECT_ITEMS = 100000;
   const MAX_PROJECT_NODES = 500000;
   const MAX_STRING_LENGTH = 2 * 1024 * 1024;
@@ -109,7 +110,7 @@
     ));
 
     if (shared || !vertex) {
-      const replacement = { id: allocateVertexId(project), x, y };
+      const replacement = { id: allocateVertexId(project), x, y, floor: Math.max(1, Math.trunc(finiteNumber(wall.floor, vertex?.floor || 1))) };
       project.verts.push(replacement);
       wall[endpointKey] = replacement.id;
     } else {
@@ -139,6 +140,82 @@
     const before = project.verts.length;
     project.verts = project.verts.filter((vertex) => used.has(vertex.id));
     return before - project.verts.length;
+  }
+
+  function normalizeFloor(value) {
+    return Math.max(1, Math.trunc(finiteNumber(value, 1)));
+  }
+
+  function migrateWallTopology(project) {
+    if (!project || typeof project !== 'object') return project;
+    if (!Array.isArray(project.walls)) project.walls = [];
+    if (!Array.isArray(project.verts)) project.verts = [];
+
+    let nextWallId = Number.isInteger(project.nextWallId) && project.nextWallId > 0 ? project.nextWallId : 1;
+    project.walls.forEach((wall) => {
+      if (Number.isInteger(wall.id) && wall.id > 0) nextWallId = Math.max(nextWallId, wall.id + 1);
+    });
+    const seenWallIds = new Set();
+    project.walls.forEach((wall) => {
+      if (!Number.isInteger(wall.id) || wall.id <= 0 || seenWallIds.has(wall.id)) {
+        while (seenWallIds.has(nextWallId)) nextWallId += 1;
+        wall.id = nextWallId++;
+      }
+      seenWallIds.add(wall.id);
+    });
+    project.nextWallId = nextWallId;
+
+    const vertexById = new Map(project.verts.map((vertex) => [vertex.id, vertex]));
+    const vertexFloor = new Map();
+    project.verts.forEach((vertex) => {
+      if (Number.isInteger(vertex.floor) && vertex.floor > 0) vertexFloor.set(vertex.id, vertex.floor);
+    });
+    project.walls.forEach((wall) => {
+      const floor = normalizeFloor(wall.floor);
+      wall.floor = floor;
+      [['v1id', 'x1', 'y1'], ['v2id', 'x2', 'y2']].forEach(([idKey, xKey, yKey]) => {
+        let vertex = vertexById.get(wall[idKey]);
+        if (!vertex) {
+          vertex = {
+            id: allocateVertexId(project),
+            x: finiteNumber(wall[xKey], 0),
+            y: finiteNumber(wall[yKey], 0),
+            floor
+          };
+          project.verts.push(vertex);
+          vertexById.set(vertex.id, vertex);
+          vertexFloor.set(vertex.id, floor);
+          wall[idKey] = vertex.id;
+        } else {
+          const assignedFloor = vertexFloor.get(vertex.id);
+          if (assignedFloor == null) {
+            vertex.floor = floor;
+            vertexFloor.set(vertex.id, floor);
+          } else if (assignedFloor !== floor) {
+            const replacement = { id: allocateVertexId(project), x: vertex.x, y: vertex.y, floor };
+            project.verts.push(replacement);
+            vertexById.set(replacement.id, replacement);
+            vertexFloor.set(replacement.id, floor);
+            wall[idKey] = replacement.id;
+            vertex = replacement;
+          } else {
+            vertex.floor = floor;
+          }
+        }
+        wall[xKey] = vertex.x;
+        wall[yKey] = vertex.y;
+      });
+    });
+    project.verts.forEach((vertex) => {
+      if (!Number.isInteger(vertex.floor) || vertex.floor <= 0) vertex.floor = 1;
+    });
+
+    (project.cables || []).forEach((cable) => (cable.pts || []).forEach((point) => {
+      if (!Number.isInteger(point.wallId) && Number.isInteger(point.wallIndex) && project.walls[point.wallIndex]) {
+        point.wallId = project.walls[point.wallIndex].id;
+      }
+    }));
+    return project;
   }
 
   function scenePresetConfig(value, scaleValue = DEFAULT_SCALE) {
@@ -313,6 +390,13 @@
   }
 
   function nearestWallIndex(point, walls, floor, maxDistance) {
+    if (Number.isInteger(point.wallId)) {
+      const stableIndex = walls.findIndex((wall) => wall.id === point.wallId);
+      if (stableIndex >= 0) {
+        const wall = walls[stableIndex];
+        if (floor == null || (wall.floor || 1) === floor) return stableIndex;
+      }
+    }
     if (Number.isInteger(point.wallIndex) && walls[point.wallIndex]) {
       const wall = walls[point.wallIndex];
       if (floor == null || (wall.floor || 1) === floor) return point.wallIndex;
@@ -354,9 +438,10 @@
     return { x: pointA.x + directionA.x * t, z: pointA.z + directionA.z * t };
   }
 
-  function cablePoint(point, x, y, z, wallIndex) {
+  function cablePoint(point, x, y, z, wallIndex, wall) {
     const result = { x, y, z };
     if (Number.isInteger(wallIndex) && wallIndex >= 0) result.wallIndex = wallIndex;
+    if (Number.isInteger(wall?.id)) result.wallId = wall.id;
     if (Number.isInteger(point.floor)) result.floor = point.floor;
     return result;
   }
@@ -390,7 +475,7 @@
         const along = (end.x - start.x) * direction.x + (end.z - start.z) * direction.z;
         const endX = start.x + direction.x * along;
         const endZ = start.z + direction.z * along;
-        pushUniquePoint(points, cablePoint(end, endX, endY, endZ, wallAIndex), epsilon);
+        pushUniquePoint(points, cablePoint(end, endX, endY, endZ, wallAIndex, wallA), epsilon);
         return points.slice(1);
       }
     }
@@ -403,13 +488,13 @@
         ? intersectLines2d(start, directionA, end, directionB)
         : null;
       if (surfaceCorner) {
-        pushUniquePoint(points, cablePoint(start, surfaceCorner.x, start.y, surfaceCorner.z, wallAIndex), epsilon);
-        pushUniquePoint(points, cablePoint(end, end.x, endY, end.z, wallBIndex), epsilon);
+        pushUniquePoint(points, cablePoint(start, surfaceCorner.x, start.y, surfaceCorner.z, wallAIndex, wallA), epsilon);
+        pushUniquePoint(points, cablePoint(end, end.x, endY, end.z, wallBIndex, wallB), epsilon);
         return points.slice(1);
       }
     }
 
-    pushUniquePoint(points, cablePoint(end, end.x, endY, end.z, wallBIndex), epsilon);
+    pushUniquePoint(points, cablePoint(end, end.x, endY, end.z, wallBIndex, wallB), epsilon);
     return points.slice(1);
   }
 
@@ -435,11 +520,13 @@
 
   function migrateLegacyDefaults(data) {
     const scale = normalizeScale(data.sc);
-    if (data.modelRevision >= 2) return data;
-    (data.walls || []).forEach((wall) => {
-      if (wall && wall.th === 8) wall.th = defaultWallThicknessUnits(scale);
-    });
-    data.modelRevision = 2;
+    if ((data.modelRevision || 0) < 2) {
+      (data.walls || []).forEach((wall) => {
+        if (wall && wall.th === 8) wall.th = defaultWallThicknessUnits(scale);
+      });
+    }
+    if ((data.modelRevision || 0) < 3) migrateWallTopology(data);
+    data.modelRevision = CURRENT_MODEL_REVISION;
     return data;
   }
 
@@ -447,6 +534,7 @@
     DEFAULT_SCALE,
     DEFAULT_SNAP_METERS,
     DEFAULT_WALL_THICKNESS_METERS,
+    CURRENT_MODEL_REVISION,
     normalizeScale,
     metersToUnits,
     unitsToMeters,
@@ -458,6 +546,7 @@
     detachWallEndpoint,
     detachWallVertices,
     removeUnusedWallVertices,
+    migrateWallTopology,
     scenePresetConfig,
     escapeHtml,
     validateProjectData,

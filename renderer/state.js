@@ -23,7 +23,7 @@ const G={
   sel:null, dragEq2d:null, selEqId3:-1,
   drawOn:false, drawS:null, drawC:null,
   pan:{x:0,y:0}, zoom:1, panning:false, panF:null,
-  nextId:1, nextVid:1, hist:[], future:[],
+  nextId:1, nextVid:1, nextWallId:1, hist:[], future:[],
   // WALL_H computed as wh3d()
   // FPS camera
   fps:{x:0,y:180,z:600,yaw:-1.57,pitch:-0.3,speed:8,keys:{},mouseDown:false,lx:0,ly:0,locked:false},
