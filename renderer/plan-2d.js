@@ -400,7 +400,10 @@ cv.addEventListener('mousedown',e=>{
   if(e.button===1||(e.button===0&&e.altKey)){
     const rc=cv.getBoundingClientRect();G.panning=true;G.panF={x:e.clientX-rc.left,y:e.clientY-rc.top};cv.style.cursor='grabbing';return;
   }
-  if(e.button===2){if(G.drawOn){G.drawOn=false;G.drawS=null;G.drawC=null;rd();}return;}
+  if(e.button===2){
+    G.panning=false;G.dragEq2d=null;VD.mode=null;VD.vid=null;VD.wIdx=null;
+    setTool('select');cv.style.cursor='crosshair';return;
+  }
   const rc=cv.getBoundingClientRect(),raw=s2w(e.clientX-rc.left,e.clientY-rc.top),wx=sn(raw.x),wy=sn(raw.y);
   if(G.tool==='select'){
     const ei=findEq(wx,wy);

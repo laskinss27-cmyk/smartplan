@@ -268,6 +268,7 @@ function applyProjectData(data){
   registerCustomEqDefinitions();
   renderCustomEqPanel();
   G.sel=null; G.drawOn=false; G.drawS=null; G.drawC=null;
+  G.cablePts=[];G.cableStepSizes=[];G.cableType=null;
   G.hist=[];G.future=[];
   G.floors=Math.max(1,...G.walls.map(w=>w.floor||1),...G.equip.map(e=>e.floor||1));
   G.floor=Math.min(G.floor||1,G.floors);
@@ -408,6 +409,34 @@ function toggleTheme(){
   try{localStorage.setItem('smartplan_theme',G._lightTheme?'light':'dark');}catch(e){}
 }
 
+// ── 3D SCENE PRESET ──
+const SCENE_PRESET_KEY='smartplan_scene_preset';
+function applyScenePreset(value,persist=true){
+  const preset=Core.scenePresetConfig(value,G.sc);
+  G.scenePreset=preset.id;
+  const btn=document.getElementById('scene-preset-btn');
+  const label=document.getElementById('scene-preset-label');
+  if(btn){
+    btn.classList.toggle('scene-architectural',preset.id==='architectural');
+    btn.setAttribute('aria-pressed',preset.id==='architectural'?'true':'false');
+    btn.title=preset.id==='architectural'
+      ? 'Архитектурный стиль: мягкий свет и атмосферная палитра'
+      : 'Монтажный стиль: контрастная техническая схема';
+  }
+  if(label)label.textContent=preset.label;
+  if(G.CAM){
+    G.CAM.fov=preset.fov;
+    G.CAM.updateProjectionMatrix();
+  }
+  if(G.R)buildScene3();
+  if(persist){
+    try{localStorage.setItem(SCENE_PRESET_KEY,preset.id);}catch(e){}
+  }
+}
+function toggleScenePreset(){
+  applyScenePreset(G.scenePreset==='architectural'?'technical':'architectural');
+}
+
 // ─── Диалог комментария ─────────────────────────────────────
 let _commentPos=null;
 function openCommentDlg(p){
@@ -536,6 +565,7 @@ function resetColorSettings(){
 
 try{if(localStorage.getItem('smartplan_theme')==='light')toggleTheme();}catch(e){}
 loadColorSettings();
+try{applyScenePreset(localStorage.getItem(SCENE_PRESET_KEY)||'technical',false);}catch(e){applyScenePreset('technical',false);}
 autoLoad();
 
 // Финальное сохранение при закрытии/перезагрузке страницы

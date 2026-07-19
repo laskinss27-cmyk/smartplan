@@ -17,6 +17,7 @@ function _hex2int(h,fb){
 const Core=window.SmartPlanCore;
 const G={
   mode:'2d', tool:'wall', tool3:'nav',
+  scenePreset:'technical',
   snap:true, gs:Core.DEFAULT_SNAP_METERS/Core.DEFAULT_SCALE, sc:Core.DEFAULT_SCALE,
   verts:[], walls:[], doors:[], equip:[], measures:[], cables:[], comments:[], customEq:[],
   sel:null, dragEq2d:null, selEqId3:-1,
@@ -29,7 +30,7 @@ const G={
   // 3D
   R:null,SC:null,CAM:null,_animStarted:false,_kbSet:false,
   // Cable drawing
-  cableType:null, cablePts:[],
+  cableType:null, cablePts:[], cableStepSizes:[],
   // 3D move
   moveObj:null, movePlane:null,
   // Display toggles

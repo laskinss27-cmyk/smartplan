@@ -15,6 +15,7 @@ function setMode(m){
   document.getElementById('hint2d').style.display=m==='2d'?'block':'none';
   document.getElementById('info3').style.display=m==='3d'?'block':'none';
   document.getElementById('spdbadge').style.display=m==='3d'?'block':'none';
+  document.getElementById('scene-preset-btn').style.display=m==='3d'?'flex':'none';
   document.getElementById('cablebox').style.display=(m==='3d'&&G.cables.length>0)?'block':'none';
   document.getElementById('cable-leg').style.display=(m==='3d'&&G.cables.length>0)?'block':'none';
   if(m==='3d')requestAnimationFrame(()=>requestAnimationFrame(()=>{initThree();autoCamera();updateCableUI();}));
@@ -134,7 +135,7 @@ _propertyPanelBody.addEventListener('focusout',commitPropertyEdit);
 
 function clearAll(){
   if(!confirm('Очистить всё?'))return;savH();
-  G.verts=[];G.walls=[];G.doors=[];G.windows=[];G.equip=[];G.measures=[];G.cables=[];G.comments=[];G.cablePts=[];G.cableType=null;
+  G.verts=[];G.walls=[];G.doors=[];G.windows=[];G.equip=[];G.measures=[];G.cables=[];G.comments=[];G.cablePts=[];G.cableStepSizes=[];G.cableType=null;
   // кастомное оборудование сохраняется
   // Кастомное оборудование НЕ очищаем — пользователь его настраивал отдельно
   G.drawOn=false;G.drawS=null;G.drawC=null;G.sel=null;

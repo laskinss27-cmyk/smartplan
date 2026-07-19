@@ -12,7 +12,7 @@ function initThree(){
     r.setSize(W,H);r.setPixelRatio(Math.min(window.devicePixelRatio,2));
     r.setClearColor(getVar('--cv-bg',G._lightTheme?'#f0f2f5':'#07090e'));r.shadowMap.enabled=true;r.shadowMap.type=THREE.PCFSoftShadowMap;r.localClippingEnabled=true;
     wrap.appendChild(r.domElement);G.R=r;
-    G.CAM=new THREE.PerspectiveCamera(60,W/H,.5,20000);
+    G.CAM=new THREE.PerspectiveCamera(Core.scenePresetConfig(G.scenePreset,G.sc).fov,W/H,.5,20000);
     G.SC=new THREE.Scene();
     setup3dEv(r.domElement);
   } else {rsz3();}
@@ -33,22 +33,47 @@ function buildScene3(){
   const sc=G.SC;
   while(sc.children.length)sc.remove(sc.children[0]);
   const WH=wh3d();
+  const preset=Core.scenePresetConfig(G.scenePreset,G.sc);
+  const technicalBg=_hex2int(getVar('--cv-bg'),G._lightTheme?0xf0f2f5:0x07090e);
+  const background=preset.background==null?technicalBg:preset.background;
+  G.R.setClearColor(background);
+  sc.background=new THREE.Color(background);
+  sc.fog=preset.fogDensity>0?new THREE.FogExp2(background,preset.fogDensity):null;
+  G.R.toneMapping=preset.id==='architectural'&&THREE.ACESFilmicToneMapping!=null
+    ?THREE.ACESFilmicToneMapping
+    :THREE.NoToneMapping;
+  G.R.toneMappingExposure=preset.id==='architectural'?1.12:1;
+  if(G.CAM.fov!==preset.fov){G.CAM.fov=preset.fov;G.CAM.updateProjectionMatrix();}
 
-  sc.add(new THREE.AmbientLight(0x3a4560,1.1));
-  const sun=new THREE.DirectionalLight(0x8899cc,1.3);
+  sc.add(new THREE.AmbientLight(preset.id==='architectural'?0x404060:0x3a4560,preset.id==='architectural'?.9:1.1));
+  const sun=new THREE.DirectionalLight(preset.id==='architectural'?0xffffff:0x8899cc,preset.id==='architectural'?1.15:1.3);
   sun.position.set(500,900,400);sun.castShadow=true;
   sun.shadow.mapSize.width=2048;sun.shadow.mapSize.height=2048;sun.shadow.camera.far=4000;sc.add(sun);
-  const fl2=new THREE.PointLight(0x4c8ef7,.3,3000);fl2.position.set(-400,500,300);sc.add(fl2);
+  const fl2=new THREE.PointLight(preset.id==='architectural'?0x4466cc:0x4c8ef7,preset.id==='architectural'?.46:.3,3000);
+  fl2.position.set(-400,500,300);sc.add(fl2);
+  if(preset.id==='architectural'){
+    const warm=new THREE.PointLight(0xffaa66,.58,2600);
+    warm.position.set(450,280,-320);sc.add(warm);
+  }
 
   // Floor
-  const flCol=_hex2int(getVar('--cv-floor'), G._lightTheme?0xe8eaee:0x0b0d16);
-  const fl=new THREE.Mesh(new THREE.PlaneGeometry(6000,6000),new THREE.MeshLambertMaterial({color:flCol}));
+  const flCol=preset.floorColor==null?_hex2int(getVar('--cv-floor'), G._lightTheme?0xe8eaee:0x0b0d16):preset.floorColor;
+  const flMat=preset.standardMaterials
+    ?new THREE.MeshStandardMaterial({color:flCol,roughness:.88,metalness:.03})
+    :new THREE.MeshLambertMaterial({color:flCol});
+  const fl=new THREE.Mesh(new THREE.PlaneGeometry(6000,6000),flMat);
   fl.rotation.x=-Math.PI/2;fl.receiveShadow=true;fl.name='floor';sc.add(fl);
   // Grid matches 2D: 1m = 1/G.sc units, show grid at 1m intervals
-  const gridC1=G._lightTheme?0xc8ccd8:0x161828,gridC2=G._lightTheme?0xd8dce8:0x0f1120;
+  const gridC1=preset.gridCenterColor==null?(G._lightTheme?0xc8ccd8:0x161828):preset.gridCenterColor;
+  const gridC2=preset.gridColor==null?(G._lightTheme?0xd8dce8:0x0f1120):preset.gridColor;
   const g3size=Math.round(10/G.sc)*200; // cover ~200m
   const g3div=Math.round(g3size*G.sc);  // one division per meter
   const gHelper=new THREE.GridHelper(g3size,g3div,gridC1,gridC2);
+  if(preset.id==='architectural'){
+    const materials=Array.isArray(gHelper.material)?gHelper.material:[gHelper.material];
+    materials.forEach(mat=>{mat.transparent=true;mat.opacity=.34;});
+    gHelper.position.y=Core.metersToUnits(.003,G.sc);
+  }
   sc.add(gHelper);
 
   // Floor 2 slab (перекрытие между этажами) — на высоте стен 1 этажа
@@ -74,7 +99,10 @@ function buildScene3(){
   }
   function _makeSlabMesh(bbox,y,color,name){
     const w=Math.max(1,bbox.maxX-bbox.minX),d=Math.max(1,bbox.maxZ-bbox.minZ);
-    const mesh=new THREE.Mesh(new THREE.PlaneGeometry(w,d),new THREE.MeshLambertMaterial({color,side:THREE.DoubleSide}));
+    const material=preset.standardMaterials
+      ?new THREE.MeshStandardMaterial({color,side:THREE.DoubleSide,roughness:.72,metalness:.03})
+      :new THREE.MeshLambertMaterial({color,side:THREE.DoubleSide});
+    const mesh=new THREE.Mesh(new THREE.PlaneGeometry(w,d),material);
     mesh.rotation.x=-Math.PI/2;
     mesh.position.set((bbox.minX+bbox.maxX)/2,y,(bbox.minZ+bbox.maxZ)/2);
     mesh.name=name;mesh.receiveShadow=true;
@@ -83,7 +111,7 @@ function buildScene3(){
 
   const f1Bbox=_wallsBbox(f1WallsForSlab);
   const f2Bbox=_wallsBbox(G.walls.filter(w=>(w.floor||1)===2));
-  const slabCol=_hex2int(getVar('--cv-wall'), G._lightTheme?0x2a5a90:0x1e2a42);
+  const slabCol=preset.wallColor==null?_hex2int(getVar('--cv-wall'), G._lightTheme?0x2a5a90:0x1e2a42):preset.wallColor;
 
   if(hasFloor2){
     // Перекрытие покрывает объединение проекций 1 и 2 этажей
@@ -135,7 +163,7 @@ function buildScene3(){
     const wallWindows=proxFilter(G.windows,wIdx);
 
     if(!wallDoors.length&&!wallWindows.length){
-      addWMesh(sc,wlen,WH,th,ang,(w.x1+w.x2)/2,yOff+WH/2,(w.y1+w.y2)/2);
+      addWMesh(sc,wlen,WH,th,ang,(w.x1+w.x2)/2,yOff+WH/2,(w.y1+w.y2)/2,wIdx);
     } else {
       const openings=[];
       wallDoors.forEach(d=>{
@@ -153,18 +181,18 @@ function buildScene3(){
       openings.sort((a,b)=>a.t-b.t);
       let prev=0;
       openings.forEach(op=>{
-        if(op.t-prev>2){const sl=op.t-prev;addWMesh(sc,sl,WH,th,ang,w.x1+wDir.x*(prev+sl/2),yOff+WH/2,w.y1+wDir.z*(prev+sl/2));}
+        if(op.t-prev>2){const sl=op.t-prev;addWMesh(sc,sl,WH,th,ang,w.x1+wDir.x*(prev+sl/2),yOff+WH/2,w.y1+wDir.z*(prev+sl/2),wIdx);}
         if(op.type==='door'){
-          if(WH-op.dh>2){const sl=Math.max(op.len,1);addWMesh(sc,sl,WH-op.dh,th,ang,w.x1+wDir.x*(op.t+sl/2),yOff+op.dh+(WH-op.dh)/2,w.y1+wDir.z*(op.t+sl/2));}
+          if(WH-op.dh>2){const sl=Math.max(op.len,1);addWMesh(sc,sl,WH-op.dh,th,ang,w.x1+wDir.x*(op.t+sl/2),yOff+op.dh+(WH-op.dh)/2,w.y1+wDir.z*(op.t+sl/2),wIdx);}
         }else{
           const sl=Math.max(op.len,1);
-          if(op.sill>2)addWMesh(sc,sl,op.sill,th,ang,w.x1+wDir.x*(op.t+sl/2),yOff+op.sill/2,w.y1+wDir.z*(op.t+sl/2));
+          if(op.sill>2)addWMesh(sc,sl,op.sill,th,ang,w.x1+wDir.x*(op.t+sl/2),yOff+op.sill/2,w.y1+wDir.z*(op.t+sl/2),wIdx);
           const winTop=op.sill+op.wiH;
-          if(WH-winTop>2)addWMesh(sc,sl,WH-winTop,th,ang,w.x1+wDir.x*(op.t+sl/2),yOff+winTop+(WH-winTop)/2,w.y1+wDir.z*(op.t+sl/2));
+          if(WH-winTop>2)addWMesh(sc,sl,WH-winTop,th,ang,w.x1+wDir.x*(op.t+sl/2),yOff+winTop+(WH-winTop)/2,w.y1+wDir.z*(op.t+sl/2),wIdx);
         }
         prev=op.t+op.len;
       });
-      if(wlen-prev>2){const sl=wlen-prev;addWMesh(sc,sl,WH,th,ang,w.x1+wDir.x*(prev+sl/2),yOff+WH/2,w.y1+wDir.z*(prev+sl/2));}
+      if(wlen-prev>2){const sl=wlen-prev;addWMesh(sc,sl,WH,th,ang,w.x1+wDir.x*(prev+sl/2),yOff+WH/2,w.y1+wDir.z*(prev+sl/2),wIdx);}
     }
   });
 
@@ -249,13 +277,17 @@ function buildScene3(){
   if(G.cableType&&G.cablePts.length>=1)drawCable3(sc,G.cablePts,'#ffffff',true);
 }
 
-function addWMesh(sc,wlen,wh,th,ang,mx,my,mz){
+function addWMesh(sc,wlen,wh,th,ang,mx,my,mz,wallIndex){
   const geo=new THREE.BoxGeometry(wlen,wh,th);
-  const wallCol=_hex2int(getVar('--cv-wall'), G._lightTheme?0x2a5a90:0x1e2a42);
-  const mat=new THREE.MeshLambertMaterial({color:wallCol});
+  const preset=Core.scenePresetConfig(G.scenePreset,G.sc);
+  const wallCol=preset.wallColor==null?_hex2int(getVar('--cv-wall'), G._lightTheme?0x2a5a90:0x1e2a42):preset.wallColor;
+  const mat=preset.standardMaterials
+    ?new THREE.MeshStandardMaterial({color:wallCol,roughness:.62,metalness:.03})
+    :new THREE.MeshLambertMaterial({color:wallCol});
   const mesh=new THREE.Mesh(geo,mat);
-  mesh.position.set(mx,my,mz);mesh.rotation.y=-ang;mesh.castShadow=true;mesh.receiveShadow=true;mesh.name='wall';sc.add(mesh);
-  const el=new THREE.LineSegments(new THREE.EdgesGeometry(geo),new THREE.LineBasicMaterial({color:0x3a5080,transparent:true,opacity:.6}));
+  mesh.position.set(mx,my,mz);mesh.rotation.y=-ang;mesh.castShadow=true;mesh.receiveShadow=true;mesh.name='wall';
+  mesh.userData.wallIndex=wallIndex;sc.add(mesh);
+  const el=new THREE.LineSegments(new THREE.EdgesGeometry(geo),new THREE.LineBasicMaterial({color:preset.edgeColor,transparent:true,opacity:preset.id==='architectural'?.38:.6}));
   el.position.copy(mesh.position);el.rotation.copy(mesh.rotation);sc.add(el);
 }
 
@@ -535,60 +567,17 @@ function placeEq3(sc,eq){
   }
 }
 
-// Реалистичная прокладка кабеля между двумя соседними стенами:
-//   - точка угла = реальный конец стены (общая вершина), а не midpoint
-//   - L-bend: A → угол(y=A.y) → угол(y=B.y) → B
-//     кабель идёт горизонтально по стене до угла, потом вертикально на нужную
-//     высоту, потом по второй стене. Если A.y≈B.y — одна точка на углу.
-//   - этаж точки определяется по её y, разные этажи — без авто-угла.
-//   - несмежные стены — без угла (прямая); пользователь добавит точки вручную.
-function routeCableCorners(A,B){
-  const _f1W=G.walls.filter(w=>(w.floor||1)===1);
-  const _f1H=_f1W.length?Math.max(..._f1W.map(w=>w.h!=null?w.h:wh3d())):wh3d();
-  const _hasF2=G.walls.some(w=>(w.floor||1)===2);
-  function pFloor(p){return (_hasF2&&p.y>=_f1H-5)?2:1;}
-  function nearestWall(p,floor){
-    let best=null,bestD=30;
-    G.walls.forEach(w=>{
-      if((w.floor||1)!==floor)return;
-      const d=dSeg3(p.x,p.z,w.x1,w.y1,w.x2,w.y2);
-      if(d<bestD){bestD=d;best=w;}
-    });
-    return best;
-  }
-  const fA=pFloor(A),fB=pFloor(B);
-  if(fA!==fB)return []; // разные этажи — авто-угла не делаем
-  const wA=nearestWall(A,fA),wB=nearestWall(B,fB);
-  if(!wA||!wB||wA===wB)return [];
-
-  // Ближайший к стене wB конец стены wA — это и есть точка угла.
-  // У смежных стен (общая вершина после snap-а) это расстояние ≈ 0.
-  const epsA=[{x:wA.x1,z:wA.y1},{x:wA.x2,z:wA.y2}];
-  const epsB=[{x:wB.x1,z:wB.y1},{x:wB.x2,z:wB.y2}];
-  let bestDist=Infinity,cornerEp=null;
-  epsA.forEach(ea=>epsB.forEach(eb=>{
-    const d=Math.sqrt((ea.x-eb.x)**2+(ea.z-eb.z)**2);
-    if(d<bestDist){bestDist=d;cornerEp=ea;}
-  }));
-  if(!cornerEp||bestDist>10)return []; // стены не сходятся — кабель не свернётся
-  const cx=cornerEp.x,cz=cornerEp.z;
-  // Если высоты совпадают — одна угловая точка (горизонтальный поворот).
-  if(Math.abs(A.y-B.y)<0.5)return [{x:cx,y:A.y,z:cz}];
-  // Иначе — вертикальный участок на самом углу.
-  return [{x:cx,y:A.y,z:cz},{x:cx,y:B.y,z:cz}];
-}
-
-// 2D distance from point to segment (xz plane)
-function dSeg3(px,pz,ax,az,bx,bz){
-  const dx=bx-ax,dz=bz-az,t=Math.max(0,Math.min(1,((px-ax)*dx+(pz-az)*dz)/(dx*dx+dz*dz||1)));
-  return Math.sqrt((px-ax-t*dx)**2+(pz-az-t*dz)**2);
+// Builds height-locked wall runs and a surface-level corner.
+function routeCablePoints(start,end){
+  const sameFloor=start.floor===end.floor;
+  return Core.routeCableSegment(start,end,sameFloor?G.walls:[],sameFloor?{floor:end.floor}:{});
 }
 
 function drawCable3(sc,pts,colorStr,ghost){
   // linewidth ignored in WebGL — draw cable as thin box meshes per segment
   const col=parseInt(colorStr.replace('#',''),16);
   const opacity=ghost?0.45:1;
-  const R=0.4; // cable radius — тонкий кабель ~4cm diameter
+  const R=Core.metersToUnits(0.02,G.sc); // 4cm visual diameter at every project scale
   const mat=new THREE.MeshBasicMaterial({color:col,transparent:ghost||false,opacity});
 
   // Vertex dots at each point
@@ -627,13 +616,10 @@ function updCam(){
 function tickFPS(){
   if(G.mode!=='3d')return;
   const f=G.fps,k=f.keys,s=f.speed;
-  const fwd=new THREE.Vector3(Math.sin(f.yaw),0,Math.cos(f.yaw));
-  const right=new THREE.Vector3(Math.cos(f.yaw),0,-Math.sin(f.yaw));
-  if(k.ArrowUp  ||k.KeyW){f.x+=fwd.x*s;f.z+=fwd.z*s;}
-  if(k.ArrowDown||k.KeyS){f.x-=fwd.x*s;f.z-=fwd.z*s;}
-  if(k.ArrowRight||k.KeyD){f.x-=right.x*s;f.z-=right.z*s;}
-  if(k.ArrowLeft||k.KeyA){f.x+=right.x*s;f.z+=right.z*s;}
-  if(k.KeyQ||k.PageUp)f.y+=s;if(k.KeyE||k.PageDown)f.y-=s;
+  const forward=(k.ArrowUp||k.KeyW?1:0)-(k.ArrowDown||k.KeyS?1:0);
+  const strafe=(k.ArrowRight||k.KeyD?1:0)-(k.ArrowLeft||k.KeyA?1:0);
+  const move=Core.cameraMoveVector(f.yaw,f.pitch,forward,strafe);
+  f.x+=move.x*s;f.y+=move.y*s;f.z+=move.z*s;
   if(k.KeyJ)f.yaw-=.03;if(k.KeyL)f.yaw+=.03;
   if(k.KeyI)f.pitch=Math.min(1.4,f.pitch+.03);if(k.KeyK)f.pitch=Math.max(-1.4,f.pitch-.03);
   updCam();
@@ -655,6 +641,8 @@ function setup3dEv(el){
   let resizeCorner=null; // 'TL'|'TR'|'BL'|'BR'
   let resizePlane3=new THREE.Plane();
   let resizeInvMat3=new THREE.Matrix4();
+  let rmbDragged=false;
+  let rmbTravel=0;
 
   function castRay(e){
     const rc=el.getBoundingClientRect();
@@ -692,19 +680,26 @@ function setup3dEv(el){
       const floorHit=allMesh.find(h=>h.object.name==='floor');
       const hit=wallHit||floorHit||allMesh[0];
       if(hit){
-        // Offset point slightly off the surface along face normal so cable is visible
-        const offset=2; // 2 units off surface
+        // Put the cable against the wall. Its centre is offset by its visual
+        // radius plus a 2mm anti-flicker gap, so the mesh almost touches it.
+        const cableRadius=Core.metersToUnits(0.02,G.sc);
+        const surfaceGap=Core.metersToUnits(0.002,G.sc);
+        const offset=cableRadius+surfaceGap;
         const n=hit.face.normal.clone();
         // Transform normal from local mesh space to world space
         n.transformDirection(hit.object.matrixWorld);
         const p=hit.point.clone().addScaledVector(n, offset);
-        const newPt={x:p.x, y:p.y, z:p.z};
-        if(G.cablePts.length>0){
-          const prev=G.cablePts[G.cablePts.length-1];
-          const corners=routeCableCorners(prev,newPt);
-          corners.forEach(c=>G.cablePts.push(c));
-        }
-        G.cablePts.push(newPt);
+        const wallIndex=Number.isInteger(hit.object.userData.wallIndex)?hit.object.userData.wallIndex:null;
+        const firstFloorWalls=G.walls.filter(w=>(w.floor||1)===1);
+        const firstFloorHeight=firstFloorWalls.length?Math.max(...firstFloorWalls.map(w=>w.h!=null?w.h:wh3d())):wh3d();
+        const hasSecondFloor=G.walls.some(w=>(w.floor||1)===2);
+        const floor=wallIndex!=null?(G.walls[wallIndex].floor||1):(hasSecondFloor&&p.y>=firstFloorHeight-5?2:1);
+        const lockedHeight=G.cablePts.length?G.cablePts[0].y:p.y;
+        const newPt={x:p.x,y:lockedHeight,z:p.z,floor};
+        if(wallIndex!=null)newPt.wallIndex=wallIndex;
+        const added=G.cablePts.length>0?routeCablePoints(G.cablePts[G.cablePts.length-1],newPt):[newPt];
+        added.forEach(point=>G.cablePts.push(point));
+        if(added.length)G.cableStepSizes.push(added.length);
         buildScene3();updateCableUI();
       }
       return;
@@ -748,8 +743,10 @@ function setup3dEv(el){
       }
       return;
     }
-    // RMB = mouse-look
-    if(e.button===2){G.fps.mouseDown=true;G.fps.lx=e.clientX;G.fps.ly=e.clientY;e.preventDefault();}
+    // RMB drag = mouse-look; a short RMB click exits the active tool.
+    if(e.button===2){
+      G.fps.mouseDown=true;G.fps.lx=e.clientX;G.fps.ly=e.clientY;rmbDragged=false;rmbTravel=0;e.preventDefault();
+    }
   });
 
   el.addEventListener('mousemove',e=>{
@@ -836,13 +833,18 @@ function setup3dEv(el){
     if(!G.fps.mouseDown&&!G.fps.locked)return;
     const dx=G.fps.locked?e.movementX:(e.clientX-G.fps.lx);
     const dy=G.fps.locked?e.movementY:(e.clientY-G.fps.ly);
+    if(G.fps.mouseDown){rmbTravel+=Math.hypot(dx,dy);if(rmbTravel>3)rmbDragged=true;}
     G.fps.yaw-=dx*.003;G.fps.pitch-=dy*.003;
     G.fps.pitch=Math.max(-1.4,Math.min(1.4,G.fps.pitch));
     G.fps.lx=e.clientX;G.fps.ly=e.clientY;updCam();
   });
 
   el.addEventListener('mouseup',e=>{
-    if(e.button===2)G.fps.mouseDown=false;
+    if(e.button===2){
+      G.fps.mouseDown=false;
+      if(!rmbDragged&&G.tool3!=='nav')set3T('nav');
+      rmbDragged=false;
+    }
     if(e.button===0&&resizeCorner){resizeCorner=null;savH();return;}
     if(e.button===0&&mvIdx>=0){mvIdx=-1;el.style.cursor='default';}
   });
@@ -932,9 +934,9 @@ function setup3dEv(el){
           if(G.fps.locked)document.exitPointerLock();
           if(G.cableType&&G.cablePts.length>0){abortCable();}
         }
-        // Backspace = remove last cable point
+        // Backspace removes the last user click and all generated bend points.
         if(e.code==='Backspace'&&G.cableType&&G.cablePts.length>0){
-          G.cablePts.pop();buildScene3();updateCableUI();e.preventDefault();
+          undoCablePt();e.preventDefault();
         }
       }
       if(G.mode==='2d'){
@@ -957,14 +959,14 @@ function set3T(t){
   // При уходе с кабельного инструмента — завершить текущий кабель (если ≥2 точек)
   if(wasCable && !isCable){
     if(G.cablePts.length>=2) finishCable();
-    else { G.cablePts=[]; buildScene3(); }
+    else { G.cablePts=[];G.cableStepSizes=[];buildScene3(); }
     G.cableType=null;
   }
 
   // При смене типа кабеля (UTP→ШВВП) — завершить предыдущий
   if(isCable && G.cableType && G.cableType!==t){
     if(G.cablePts.length>=2) finishCable();
-    else { G.cablePts=[]; buildScene3(); }
+    else { G.cablePts=[];G.cableStepSizes=[];buildScene3(); }
   }
 
   G.tool3=t;
@@ -989,7 +991,7 @@ function set3T(t){
 }
 function finishCable(){
   if(!G.cableType||G.cablePts.length<2){
-    G.cablePts=[];buildScene3();updateCableUI();return;
+    G.cablePts=[];G.cableStepSizes=[];buildScene3();updateCableUI();return;
   }
   savH();
   G.cables.push({
@@ -997,14 +999,19 @@ function finishCable(){
     pts:[...G.cablePts],
     name:`${CABLE_LAB[G.cableType]} ${G.cables.filter(c=>c.type===G.cableType).length+1}`
   });
-  G.cablePts=[];
+  G.cablePts=[];G.cableStepSizes=[];
   // Оставляем G.cableType — можно сразу прокладывать следующий того же типа
   buildScene3();updateCableUI();
 }
-function undoCablePt(){if(G.cablePts.length>0){G.cablePts.pop();buildScene3();updateCableUI();}}
+function undoCablePt(){
+  if(!G.cablePts.length)return;
+  const count=G.cableStepSizes.length?G.cableStepSizes.pop():1;
+  G.cablePts.splice(Math.max(0,G.cablePts.length-count),count);
+  buildScene3();updateCableUI();
+}
 function abortCable(){
   // Отменить текущую прокладку без сохранения
-  G.cablePts=[];G.cableType=null;
+  G.cablePts=[];G.cableStepSizes=[];G.cableType=null;
   document.getElementById('t3finish').style.display='none';
   document.getElementById('t3undo1').style.display='none';
   document.getElementById('i3cable').style.display='none';

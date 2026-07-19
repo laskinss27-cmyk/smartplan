@@ -34,6 +34,38 @@
     return metersToUnits(DEFAULT_WALL_THICKNESS_METERS, scale);
   }
 
+  function scenePresetConfig(value, scaleValue = DEFAULT_SCALE) {
+    const scale = normalizeScale(scaleValue);
+    if (value === 'architectural') {
+      return Object.freeze({
+        id: 'architectural',
+        label: 'Архитектурный',
+        fov: 48,
+        background: 0x111122,
+        fogDensity: 0.008 * scale,
+        floorColor: 0x29463b,
+        wallColor: 0x9a8068,
+        edgeColor: 0x6b5745,
+        gridCenterColor: 0x7791b9,
+        gridColor: 0x354a67,
+        standardMaterials: true
+      });
+    }
+    return Object.freeze({
+      id: 'technical',
+      label: 'Монтажный',
+      fov: 60,
+      background: null,
+      fogDensity: 0,
+      floorColor: null,
+      wallColor: null,
+      edgeColor: 0x3a5080,
+      gridCenterColor: null,
+      gridColor: null,
+      standardMaterials: false
+    });
+  }
+
   function escapeHtml(value) {
     return String(value == null ? '' : value)
       .replace(/&/g, '&amp;')
@@ -154,6 +186,146 @@
     return factor;
   }
 
+  function pointToWallDistance(point, wall) {
+    const dx = wall.x2 - wall.x1;
+    const dz = wall.y2 - wall.y1;
+    const lengthSquared = dx * dx + dz * dz;
+    const t = lengthSquared > 0
+      ? Math.max(0, Math.min(1, ((point.x - wall.x1) * dx + (point.z - wall.y1) * dz) / lengthSquared))
+      : 0;
+    const x = wall.x1 + t * dx;
+    const z = wall.y1 + t * dz;
+    return Math.hypot(point.x - x, point.z - z);
+  }
+
+  function wallDirection(wall) {
+    const dx = wall.x2 - wall.x1;
+    const dz = wall.y2 - wall.y1;
+    const length = Math.hypot(dx, dz);
+    return length > 1e-9 ? { x: dx / length, z: dz / length } : null;
+  }
+
+  function nearestWallIndex(point, walls, floor, maxDistance) {
+    if (Number.isInteger(point.wallIndex) && walls[point.wallIndex]) {
+      const wall = walls[point.wallIndex];
+      if (floor == null || (wall.floor || 1) === floor) return point.wallIndex;
+    }
+    let bestIndex = -1;
+    let bestDistance = maxDistance;
+    walls.forEach((wall, index) => {
+      if (floor != null && (wall.floor || 1) !== floor) return;
+      const distance = pointToWallDistance(point, wall);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestIndex = index;
+      }
+    });
+    return bestIndex;
+  }
+
+  function sharedWallCorner(wallA, wallB, tolerance) {
+    const endsA = [{ x: wallA.x1, z: wallA.y1 }, { x: wallA.x2, z: wallA.y2 }];
+    const endsB = [{ x: wallB.x1, z: wallB.y1 }, { x: wallB.x2, z: wallB.y2 }];
+    let closest = null;
+    let bestDistance = Infinity;
+    endsA.forEach((a) => endsB.forEach((b) => {
+      const distance = Math.hypot(a.x - b.x, a.z - b.z);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        closest = { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 };
+      }
+    }));
+    return bestDistance <= tolerance ? closest : null;
+  }
+
+  function intersectLines2d(pointA, directionA, pointB, directionB) {
+    const cross = directionA.x * directionB.z - directionA.z * directionB.x;
+    if (Math.abs(cross) < 1e-8) return null;
+    const dx = pointB.x - pointA.x;
+    const dz = pointB.z - pointA.z;
+    const t = (dx * directionB.z - dz * directionB.x) / cross;
+    return { x: pointA.x + directionA.x * t, z: pointA.z + directionA.z * t };
+  }
+
+  function cablePoint(point, x, y, z, wallIndex) {
+    const result = { x, y, z };
+    if (Number.isInteger(wallIndex) && wallIndex >= 0) result.wallIndex = wallIndex;
+    if (Number.isInteger(point.floor)) result.floor = point.floor;
+    return result;
+  }
+
+  function pushUniquePoint(points, point, epsilon) {
+    const previous = points[points.length - 1];
+    if (!previous || Math.hypot(previous.x - point.x, previous.y - point.y, previous.z - point.z) > epsilon) {
+      points.push(point);
+    }
+  }
+
+  // Returns the points to append after `start`, including a normalized `end`.
+  // Every generated segment stays at the height established by `start`.
+  function routeCableSegment(start, end, walls = [], options = {}) {
+    const epsilon = finiteNumber(options.epsilon, 1e-6);
+    const cornerTolerance = finiteNumber(options.cornerTolerance, 10);
+    const maxWallDistance = finiteNumber(options.maxWallDistance, 30);
+    const floor = options.floor == null ? null : Number(options.floor);
+    const wallAIndex = nearestWallIndex(start, walls, floor, maxWallDistance);
+    const wallBIndex = nearestWallIndex(end, walls, floor, maxWallDistance);
+    const wallA = walls[wallAIndex];
+    const wallB = walls[wallBIndex];
+    const points = [start];
+    // A cable run keeps the height established by its first point. Cursor
+    // movement on later wall clicks only chooses the horizontal position.
+    const endY = start.y;
+
+    if (wallA && wallB && wallAIndex === wallBIndex) {
+      const direction = wallDirection(wallA);
+      if (direction) {
+        const along = (end.x - start.x) * direction.x + (end.z - start.z) * direction.z;
+        const endX = start.x + direction.x * along;
+        const endZ = start.z + direction.z * along;
+        pushUniquePoint(points, cablePoint(end, endX, endY, endZ, wallAIndex), epsilon);
+        return points.slice(1);
+      }
+    }
+
+    if (wallA && wallB && wallAIndex !== wallBIndex) {
+      const directionA = wallDirection(wallA);
+      const directionB = wallDirection(wallB);
+      const sharedCorner = sharedWallCorner(wallA, wallB, cornerTolerance);
+      const surfaceCorner = directionA && directionB && sharedCorner
+        ? intersectLines2d(start, directionA, end, directionB)
+        : null;
+      if (surfaceCorner) {
+        pushUniquePoint(points, cablePoint(start, surfaceCorner.x, start.y, surfaceCorner.z, wallAIndex), epsilon);
+        pushUniquePoint(points, cablePoint(end, end.x, endY, end.z, wallBIndex), epsilon);
+        return points.slice(1);
+      }
+    }
+
+    pushUniquePoint(points, cablePoint(end, end.x, endY, end.z, wallBIndex), epsilon);
+    return points.slice(1);
+  }
+
+  function cameraMoveVector(yawValue, pitchValue, forwardAmount = 0, strafeAmount = 0) {
+    const yaw = finiteNumber(yawValue, 0);
+    const pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, finiteNumber(pitchValue, 0)));
+    const forward = finiteNumber(forwardAmount, 0);
+    const strafe = finiteNumber(strafeAmount, 0);
+    const cosPitch = Math.cos(pitch);
+    const vector = {
+      x: cosPitch * Math.sin(yaw) * forward - Math.cos(yaw) * strafe,
+      y: Math.sin(pitch) * forward,
+      z: cosPitch * Math.cos(yaw) * forward + Math.sin(yaw) * strafe
+    };
+    const length = Math.hypot(vector.x, vector.y, vector.z);
+    if (length > 1) {
+      vector.x /= length;
+      vector.y /= length;
+      vector.z /= length;
+    }
+    return vector;
+  }
+
   function migrateLegacyDefaults(data) {
     const scale = normalizeScale(data.sc);
     if (data.modelRevision >= 2) return data;
@@ -172,9 +344,12 @@
     metersToUnits,
     unitsToMeters,
     defaultWallThicknessUnits,
+    scenePresetConfig,
     escapeHtml,
     validateProjectData,
     rescaleProjectGeometry,
+    routeCableSegment,
+    cameraMoveVector,
     migrateLegacyDefaults
   });
 });

@@ -58,6 +58,10 @@
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="10.5" r="2.5"/><circle cx="8.5" cy="7.5" r="2.5"/><circle cx="6.5" cy="12.5" r="2.5"/><path d="M12 22a10 10 0 0 1 0-20c5 0 9 4 9 8a4 4 0 0 1-4 4h-2.5a1.5 1.5 0 0 0-1 2.6 1.5 1.5 0 0 1-1 2.6c-.5 0-.5 0 .5 2.8z"/></svg>
       Цвета
     </button>
+    <button class="ab" onclick="toggleScenePreset()" id="scene-preset-btn" title="Стиль отображения 3D-сцены" aria-pressed="false" style="display:none">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M5 21V9l7-6 7 6v12M9 21v-7h6v7"/><path d="M7 11h2M15 11h2" opacity=".6"/></svg>
+      <span id="scene-preset-label">Монтажный</span>
+    </button>
     <button class="ab" onclick="toggleTheme()" id="theme-btn" title="Сменить тему">
       <svg id="theme-icon-dark" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
       <svg id="theme-icon-light" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
@@ -121,19 +125,18 @@
     <label>1px= <select id="scl" onchange="setProjectScale(+this.value)"><option value="0.05">5см</option><option value="0.1" selected>10см</option><option value="0.2">20см</option><option value="0.25">25см</option></select></label>
   </div>
   <div id="coords">X:<span id="cx">0.00м</span> Y:<span id="cy">0.00м</span></div>
-  <div id="hint2d">W-стена · D-дверь · R-линейка · V-выбор (тащить стену за середину) · Alt+ЛКМ — пан · Колесо — зум</div>
+  <div id="hint2d">W-стена · D-дверь · R-линейка · V-выбор (тащить стену за середину) · Alt+ЛКМ — пан · ПКМ — закончить инструмент · Колесо — зум</div>
 
   <!-- 3D overlays -->
   <div id="info3">
     <b>Управление</b><br>
-    <span style="color:#e0e8ff">W A S D / ↑↓←→</span> — движение<br>
-    <span style="color:#e0e8ff">ПКМ + мышь</span> — поворот<br>
-    <span style="color:#e0e8ff">Q / E</span> — вверх / вниз<br>
+    <span style="color:#e0e8ff">W / S</span> — полёт по направлению взгляда · <span style="color:#e0e8ff">A / D</span> — в стороны<br>
+    <span style="color:#e0e8ff">ПКМ + мышь</span> — поворот · короткий ПКМ — закончить инструмент<br>
     <span style="color:#e0e8ff">Колесо</span> — скорость: <b id="spd-val" style="color:#7ab8ff">8</b><br>
     <span style="color:rgba(200,210,230,.55)">2×клик — захват мыши (Esc — отпустить)</span><br>
     <span id="i3move" style="color:#f0b840;display:none"><b>Перемещение:</b> ЛКМ — выбрать/тащить объект</span>
     <span id="i3comment" style="color:#26d4e8;display:none"><b>Комментарий:</b> ЛКМ по поверхности — поставить точку</span><br>
-    <span id="i3cable" style="color:#2dd87a;display:none"><b>Кабель:</b> ЛКМ по поверхности — точка · Backspace — убрать</span>
+    <span id="i3cable" style="color:#2dd87a;display:none"><b>Кабель:</b> первая точка задаёт высоту · ЛКМ — продолжить · Backspace — убрать участок · ПКМ — завершить</span>
   </div>
   <div id="lock-hint">🖱 Мышь захвачена<br><span style="color:var(--t3);font-size:11px">Esc — отпустить</span></div>
   <div id="cablebox"><div class="cb-t">Кабельные трассы</div><div id="cb-body"></div></div>
