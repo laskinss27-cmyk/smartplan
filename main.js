@@ -1,6 +1,7 @@
 const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require('electron');
 const path = require('path');
 const fs = require('fs/promises');
+const Core = require('./project-core');
 
 const MAX_PROJECT_FILE_BYTES = 20 * 1024 * 1024;
 let win;
@@ -22,12 +23,14 @@ async function openProjectFile(parentWindow) {
   const stat = await fs.stat(filePaths[0]);
   if (stat.size > MAX_PROJECT_FILE_BYTES) throw new Error('Файл проекта превышает 20 МБ');
   const data = JSON.parse(await fs.readFile(filePaths[0], 'utf8'));
-  assertProjectEnvelope(data);
+  Core.validateProjectData(data);
   return data;
 }
 
 async function saveProjectFile(parentWindow, data) {
   assertProjectEnvelope(data);
+  Core.validateProjectData(data);
+  Core.assertProjectIntegrity(data);
   const json = JSON.stringify(data, null, 2);
   if (Buffer.byteLength(json, 'utf8') > MAX_PROJECT_FILE_BYTES) {
     throw new Error('Проект превышает допустимый размер 20 МБ');

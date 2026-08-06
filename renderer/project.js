@@ -239,16 +239,23 @@ function getProjectData(){
     equip:G.equip, measures:G.measures,
     cables:G.cables, comments:G.comments,
     customEq:G.customEq,
-    sc:G.sc, gs:G.gs, nextWallId:G.nextWallId,
+    sc:G.sc, gs:G.gs, nextId:G.nextId, nextVid:G.nextVid, nextWallId:G.nextWallId,
     savedAt:new Date().toISOString()
   };
 }
 
-function applyProjectData(data){
+function applyProjectData(data,options={}){
+  let integrityReport=null;
   try{
     Core.validateProjectData(data);
     Core.migrateLegacyDefaults(data);
+    integrityReport=Core.repairProjectIntegrity(data);
+    Core.assertProjectIntegrity(data);
   }catch(err){alert('Неверный формат файла: '+err.message);return false;}
+  if(integrityReport?.repaired){
+    console.warn('SmartPlan восстановил целостность проекта:',integrityReport.changes);
+    if(options.notifyRepair)alert('Проект открыт после безопасного восстановления:\n• '+integrityReport.changes.join('\n• '));
+  }
   G.verts=data.verts||[];
   G.walls=data.walls||[];
   G.doors=data.doors||[];
@@ -285,6 +292,10 @@ function applyProjectData(data){
 // Сохранить в JSON файл
 async function saveProject(){
   const data=getProjectData();
+  try{
+    Core.validateProjectData(data);
+    Core.assertProjectIntegrity(data);
+  }catch(err){alert('Проект не сохранён: '+err.message);return;}
   if(window.electronAPI?.saveProject){
     try{
       const result=await window.electronAPI.saveProject(data);
@@ -308,7 +319,7 @@ async function loadProject(){
   if(window.electronAPI?.openProject){
     try{
       const data=await window.electronAPI.openProject();
-      if(data&&applyProjectData(data))autoSave();
+      if(data&&applyProjectData(data,{notifyRepair:true}))autoSave();
     }catch(err){alert('Ошибка чтения файла: '+err.message);}
     return;
   }
@@ -320,7 +331,7 @@ async function loadProject(){
     reader.onload=ev=>{
       try{
         const data=JSON.parse(ev.target.result);
-        if(applyProjectData(data))autoSave();
+        if(applyProjectData(data,{notifyRepair:true}))autoSave();
       }catch(err){alert('Ошибка чтения файла: '+err.message);}
     };
     reader.readAsText(file);
@@ -335,10 +346,13 @@ const LS_EQ_KEY='smartplan_v3_customEq';
 function autoSave(){
   try{
     const data=getProjectData();
+    Core.validateProjectData(data);
+    Core.assertProjectIntegrity(data);
     localStorage.setItem(LS_KEY, JSON.stringify(data));
     // Кастомное оборудование отдельно — восстанавливается даже в новом проекте
     localStorage.setItem(LS_EQ_KEY, JSON.stringify(G.customEq));
-  }catch(e){}
+    return true;
+  }catch(e){console.error('Автосохранение отменено:',e);return false;}
 }
 
 function autoLoad(){

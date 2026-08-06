@@ -674,7 +674,7 @@ function closeP(){G.sel=null;document.getElementById('props').classList.remove('
 function delSel(){
   if(!G.sel)return;
   runProjectChange('delete-selection',()=>{
-    if(G.sel.t==='wall'){const wall=G.walls[G.sel.i];if(wall){Core.detachWallOpenings(G,wall.id);Core.detachWallEquipment(G,wall.id);}G.walls.splice(G.sel.i,1);}
+    if(G.sel.t==='wall'){const wall=G.walls[G.sel.i];if(wall){Core.detachWallOpenings(G,wall.id);Core.detachWallEquipment(G,wall.id);}G.walls.splice(G.sel.i,1);if(wall){Core.syncCableWallReferences(G,wall.id);Core.removeUnusedWallVertices(G);}}
     if(G.sel.t==='door')G.doors.splice(G.sel.i,1);
     if(G.sel.t==='window')G.windows.splice(G.sel.i,1);
     if(G.sel.t==='eq')G.equip.splice(G.sel.i,1);

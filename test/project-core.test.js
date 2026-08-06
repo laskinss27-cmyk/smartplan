@@ -385,6 +385,120 @@ test('project validation rejects unsupported and unsafe data', () => {
   assert.throws(() => Core.validateProjectData({ version: 3, walls: [{ x1: Infinity }] }), /Некорректное поле/);
   assert.throws(() => Core.validateProjectData({ version: 3, sc: 0 }), /масштаб/);
   assert.throws(() => Core.validateProjectData({ version: 3, gs: -1 }), /шаг привязки/);
+  assert.throws(() => Core.validateProjectData({ version: 3, modelRevision: Core.CURRENT_MODEL_REVISION + 1 }), /новее/);
+});
+
+test('project integrity accepts a consistent empty project', () => {
+  const project = {
+    version: 3,
+    modelRevision: Core.CURRENT_MODEL_REVISION,
+    sc: 0.1,
+    gs: 2.5,
+    verts: [], walls: [], doors: [], windows: [], equip: [], measures: [],
+    cables: [], comments: [], customEq: [], nextWallId: 1
+  };
+
+  assert.equal(Core.repairProjectIntegrity(project).repaired, false);
+  assert.equal(Core.assertProjectIntegrity(project), project);
+});
+
+test('integrity repair restores topology and recoverable wall attachments', () => {
+  const project = {
+    version: 3,
+    modelRevision: Core.CURRENT_MODEL_REVISION,
+    sc: 0.1,
+    gs: 2.5,
+    verts: [
+      { id: 1, x: 0, y: 0, floor: 1 },
+      { id: 2, x: 100, y: 0, floor: 1 },
+      { id: 3, x: 200, y: 200, floor: 1 }
+    ],
+    walls: [{ id: 10, v1id: 1, v2id: 2, x1: 5, y1: 0, x2: 95, y2: 0, floor: 1 }],
+    doors: [{ x1: 20, y1: 0, x2: 40, y2: 0, floor: 1, wallId: 999, wallPosition: 4 }],
+    windows: [],
+    equip: [{ id: 1, type: 'socket', x: 50, y: 2, floor: 1, wallId: 999, wallPosition: -2, wallSide: 4 }],
+    measures: [],
+    cables: [{ type: 'utp', pts: [
+      { x: 10, y: 20, z: 0, floor: 1, wallId: 10, wallIndex: 8 },
+      { x: 50, y: 20, z: 0, floor: 1, wallId: 999, wallIndex: 9 }
+    ] }],
+    comments: [],
+    customEq: [],
+    nextWallId: 2
+  };
+
+  const report = Core.repairProjectIntegrity(project);
+
+  assert.equal(report.repaired, true);
+  assert.deepEqual(project.verts.map((vertex) => vertex.id), [1, 2]);
+  assert.deepEqual([project.walls[0].x1, project.walls[0].x2], [0, 100]);
+  assert.equal(project.doors[0].wallId, 10);
+  assert.equal(project.equip[0].wallId, 10);
+  assert.equal(project.cables[0].pts[0].wallIndex, 0);
+  assert.equal(project.cables[0].pts[1].wallId, undefined);
+  assert.equal(project.cables[0].pts[1].wallIndex, undefined);
+  assert.equal(Core.assertProjectIntegrity(project), project);
+});
+
+test('integrity repair fills missing collections and resolves shared object IDs', () => {
+  const project = {
+    version: 3,
+    sc: 0.1,
+    equip: [{ id: 7, type: 'tree', x: 1, y: 2, floor: 1 }],
+    comments: [{ id: 7, x: 1, y: 2, z: 3, text: 'note' }]
+  };
+
+  Core.repairProjectIntegrity(project);
+
+  assert.equal(project.walls.length, 0);
+  assert.notEqual(project.equip[0].id, project.comments[0].id);
+  assert.equal(Core.assertProjectIntegrity(project), project);
+});
+
+test('strict integrity rejects geometry that cannot be safely reconstructed', () => {
+  const project = {
+    version: 3,
+    sc: 0.1,
+    gs: 2.5,
+    verts: [{ id: 1, x: 0, y: 0, floor: 1 }, { id: 2, x: 0, y: 0, floor: 1 }],
+    walls: [{ id: 1, v1id: 1, v2id: 2, x1: 0, y1: 0, x2: 0, y2: 0, floor: 1 }],
+    doors: [], windows: [], equip: [], measures: [], cables: [], comments: [], customEq: [], nextWallId: 2
+  };
+
+  assert.throws(() => Core.assertProjectIntegrity(project), /нулевую длину/);
+});
+
+test('strict integrity rejects stale attached-object coordinates', () => {
+  const project = {
+    version: 3,
+    sc: 0.1,
+    gs: 2.5,
+    verts: [{ id: 1, x: 0, y: 0, floor: 1 }, { id: 2, x: 100, y: 0, floor: 1 }],
+    walls: [{ id: 1, v1id: 1, v2id: 2, x1: 0, y1: 0, x2: 100, y2: 0, floor: 1 }],
+    doors: [{ x1: 70, y1: 0, x2: 90, y2: 0, floor: 1, wallId: 1, wallPosition: 0.3, wallDirection: 1 }],
+    windows: [], equip: [], measures: [], cables: [], comments: [], customEq: [], nextWallId: 2
+  };
+
+  assert.throws(() => Core.assertProjectIntegrity(project), /смещён относительно/);
+});
+
+test('cable wall references remain stable when walls are removed or reordered', () => {
+  const project = {
+    walls: [
+      { id: 10, floor: 1 },
+      { id: 20, floor: 1 }
+    ],
+    cables: [{ pts: [
+      { x: 1, y: 2, z: 3, wallId: 20, wallIndex: 1 },
+      { x: 2, y: 2, z: 3, wallId: 10, wallIndex: 0 }
+    ] }]
+  };
+
+  project.walls.splice(0, 1);
+  assert.equal(Core.syncCableWallReferences(project, 10), 2);
+  assert.equal(project.cables[0].pts[0].wallIndex, 0);
+  assert.equal(project.cables[0].pts[1].wallId, undefined);
+  assert.equal(project.cables[0].pts[1].wallIndex, undefined);
 });
 
 test('HTML escaping protects project-controlled labels and attributes', () => {

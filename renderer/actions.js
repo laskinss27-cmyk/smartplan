@@ -91,7 +91,7 @@ function restoreHistorySnapshot(snapshot){
 }
 function scheduleAutoSave(){
   clearTimeout(_autoSaveTimer);
-  _autoSaveTimer=setTimeout(()=>{autoSave();showSaveBadge();},800);
+  _autoSaveTimer=setTimeout(()=>{if(autoSave())showSaveBadge();},800);
 }
 const projectHistory=Core.createSnapshotHistory(historySnapshot,restoreHistorySnapshot,{
   limit:60,

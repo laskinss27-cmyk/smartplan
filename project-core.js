@@ -657,6 +657,9 @@
       throw new Error('Неверный формат файла проекта');
     }
     if (data.version !== 3) throw new Error('Поддерживаются только проекты SmartPlan версии 3');
+    if (data.modelRevision != null && (!Number.isInteger(data.modelRevision) || data.modelRevision < 0 || data.modelRevision > CURRENT_MODEL_REVISION)) {
+      throw new Error('Версия модели проекта новее установленной версии SmartPlan');
+    }
     if (data.sc != null && (!Number.isFinite(data.sc) || data.sc < 0.001 || data.sc > 10)) throw new Error('Некорректный масштаб проекта');
     if (data.gs != null && (!Number.isFinite(data.gs) || data.gs <= 0 || data.gs > 100000)) throw new Error('Некорректный шаг привязки');
     const collections = ['verts', 'walls', 'doors', 'windows', 'equip', 'measures', 'cables', 'comments', 'customEq'];
@@ -699,6 +702,266 @@
     });
     assertSafeProjectTree(data);
     return data;
+  }
+
+  function projectIntegrityError(message) {
+    return new Error(`Нарушена целостность проекта: ${message}`);
+  }
+
+  function assertProjectIntegrity(project) {
+    validateProjectData(project);
+    const collections = ['verts', 'walls', 'doors', 'windows', 'equip', 'measures', 'cables', 'comments', 'customEq'];
+    collections.forEach((key) => {
+      if (!Array.isArray(project[key])) throw projectIntegrityError(`отсутствует коллекция ${key}`);
+    });
+
+    const positiveInteger = (value) => Number.isInteger(value) && value > 0;
+    const validFloor = (value) => positiveInteger(value == null ? 1 : value);
+    const assertUniqueIds = (items, label, used = new Set()) => {
+      items.forEach((item) => {
+        if (!positiveInteger(item.id)) throw projectIntegrityError(`${label} имеет неверный идентификатор`);
+        if (used.has(item.id)) throw projectIntegrityError(`${label} содержит повторяющийся идентификатор ${item.id}`);
+        used.add(item.id);
+      });
+      return used;
+    };
+
+    const vertexIds = assertUniqueIds(project.verts, 'Вершина');
+    const wallIds = assertUniqueIds(project.walls, 'Стена');
+    const objectIds = assertUniqueIds(project.equip, 'Оборудование');
+    assertUniqueIds(project.comments, 'Комментарий', objectIds);
+    const vertices = new Map(project.verts.map((vertex) => [vertex.id, vertex]));
+    const walls = new Map(project.walls.map((wall, index) => [wall.id, { wall, index }]));
+    const usedVertexIds = new Set();
+    const epsilon = 1e-6;
+
+    project.verts.forEach((vertex) => {
+      if (!validFloor(vertex.floor)) throw projectIntegrityError(`вершина ${vertex.id} имеет неверный этаж`);
+    });
+    project.walls.forEach((wall) => {
+      if (!validFloor(wall.floor)) throw projectIntegrityError(`стена ${wall.id} имеет неверный этаж`);
+      if (!positiveInteger(wall.v1id) || !positiveInteger(wall.v2id) || wall.v1id === wall.v2id) {
+        throw projectIntegrityError(`стена ${wall.id} имеет неверные вершины`);
+      }
+      const first = vertices.get(wall.v1id);
+      const second = vertices.get(wall.v2id);
+      if (!first || !second) throw projectIntegrityError(`стена ${wall.id} ссылается на отсутствующую вершину`);
+      if (normalizeFloor(first.floor) !== wall.floor || normalizeFloor(second.floor) !== wall.floor) {
+        throw projectIntegrityError(`стена ${wall.id} связана с вершиной другого этажа`);
+      }
+      if (distance2d(first.x, first.y, wall.x1, wall.y1) > epsilon || distance2d(second.x, second.y, wall.x2, wall.y2) > epsilon) {
+        throw projectIntegrityError(`координаты стены ${wall.id} не совпадают с её вершинами`);
+      }
+      if (distance2d(wall.x1, wall.y1, wall.x2, wall.y2) <= epsilon) {
+        throw projectIntegrityError(`стена ${wall.id} имеет нулевую длину`);
+      }
+      usedVertexIds.add(wall.v1id);
+      usedVertexIds.add(wall.v2id);
+    });
+    project.verts.forEach((vertex) => {
+      if (!usedVertexIds.has(vertex.id)) throw projectIntegrityError(`вершина ${vertex.id} не принадлежит ни одной стене`);
+    });
+
+    const assertOpening = (opening, label) => {
+      if (!validFloor(opening.floor)) throw projectIntegrityError(`${label} имеет неверный этаж`);
+      if (distance2d(opening.x1, opening.y1, opening.x2, opening.y2) <= epsilon) {
+        throw projectIntegrityError(`${label} имеет нулевую ширину`);
+      }
+      if (opening.wallId == null) return;
+      const entry = walls.get(opening.wallId);
+      if (!entry) throw projectIntegrityError(`${label} ссылается на отсутствующую стену`);
+      if (normalizeFloor(entry.wall.floor) !== normalizeFloor(opening.floor)) {
+        throw projectIntegrityError(`${label} связан со стеной другого этажа`);
+      }
+      if (!Number.isFinite(opening.wallPosition) || opening.wallPosition < 0 || opening.wallPosition > 1 || ![-1, 1].includes(opening.wallDirection)) {
+        throw projectIntegrityError(`${label} имеет неверную привязку к стене`);
+      }
+      const expected = { ...opening };
+      if (!syncOpeningToWall(expected, entry.wall)
+        || distance2d(expected.x1, expected.y1, opening.x1, opening.y1) > epsilon
+        || distance2d(expected.x2, expected.y2, opening.x2, opening.y2) > epsilon) {
+        throw projectIntegrityError(`${label} смещён относительно связанной стены`);
+      }
+    };
+    project.doors.forEach((opening, index) => assertOpening(opening, `Дверь ${index + 1}`));
+    project.windows.forEach((opening, index) => assertOpening(opening, `Окно ${index + 1}`));
+
+    project.equip.forEach((equipment) => {
+      if (!validFloor(equipment.floor)) throw projectIntegrityError(`оборудование ${equipment.id} имеет неверный этаж`);
+      const mount = equipmentMountKind(equipment, project.customEq);
+      if (mount !== 'wall') {
+        if (equipment.wallId != null || equipment.wallPosition != null || equipment.wallSide != null) {
+          throw projectIntegrityError(`оборудование ${equipment.id} хранит лишнюю привязку к стене`);
+        }
+        return;
+      }
+      if (equipment.wallId == null) return;
+      const entry = walls.get(equipment.wallId);
+      if (!entry) throw projectIntegrityError(`оборудование ${equipment.id} ссылается на отсутствующую стену`);
+      if (normalizeFloor(entry.wall.floor) !== normalizeFloor(equipment.floor)) {
+        throw projectIntegrityError(`оборудование ${equipment.id} связано со стеной другого этажа`);
+      }
+      if (!Number.isFinite(equipment.wallPosition) || equipment.wallPosition < 0 || equipment.wallPosition > 1 || ![-1, 1].includes(equipment.wallSide)) {
+        throw projectIntegrityError(`оборудование ${equipment.id} имеет неверную привязку к стене`);
+      }
+      const expected = { ...equipment };
+      if (!syncEquipmentToWall(expected, entry.wall) || distance2d(expected.x, expected.y, equipment.x, equipment.y) > epsilon) {
+        throw projectIntegrityError(`оборудование ${equipment.id} смещено относительно связанной стены`);
+      }
+    });
+
+    project.cables.forEach((cable, cableIndex) => {
+      if (cable.pts.length < 2) throw projectIntegrityError(`кабель ${cableIndex + 1} содержит меньше двух точек`);
+      cable.pts.forEach((point, pointIndex) => {
+        if (point.floor != null && !validFloor(point.floor)) {
+          throw projectIntegrityError(`точка ${pointIndex + 1} кабеля ${cableIndex + 1} имеет неверный этаж`);
+        }
+        if (point.wallId == null) {
+          if (point.wallIndex != null) throw projectIntegrityError(`точка ${pointIndex + 1} кабеля ${cableIndex + 1} хранит устаревший индекс стены`);
+          return;
+        }
+        const entry = walls.get(point.wallId);
+        if (!entry) throw projectIntegrityError(`точка ${pointIndex + 1} кабеля ${cableIndex + 1} ссылается на отсутствующую стену`);
+        if (point.floor != null && normalizeFloor(point.floor) !== normalizeFloor(entry.wall.floor)) {
+          throw projectIntegrityError(`точка ${pointIndex + 1} кабеля ${cableIndex + 1} связана со стеной другого этажа`);
+        }
+        if (point.wallIndex != null && point.wallIndex !== entry.index) {
+          throw projectIntegrityError(`точка ${pointIndex + 1} кабеля ${cableIndex + 1} хранит устаревший индекс стены`);
+        }
+      });
+    });
+
+    const customTypes = new Set();
+    project.customEq.forEach((definition) => {
+      if (customTypes.has(definition.type)) throw projectIntegrityError(`тип оборудования ${definition.type} определён несколько раз`);
+      customTypes.add(definition.type);
+    });
+    if (project.nextWallId != null && (!positiveInteger(project.nextWallId) || wallIds.has(project.nextWallId))) {
+      throw projectIntegrityError('счётчик стен может создать повторяющийся идентификатор');
+    }
+    if (project.nextVid != null && (!positiveInteger(project.nextVid) || vertexIds.has(project.nextVid))) {
+      throw projectIntegrityError('счётчик вершин может создать повторяющийся идентификатор');
+    }
+    if (project.nextId != null && (!positiveInteger(project.nextId) || objectIds.has(project.nextId))) {
+      throw projectIntegrityError('счётчик объектов может создать повторяющийся идентификатор');
+    }
+    return project;
+  }
+
+  function repairProjectIntegrity(project) {
+    validateProjectData(project);
+    const changes = [];
+    const note = (message) => {
+      if (!changes.includes(message)) changes.push(message);
+    };
+    const collections = ['verts', 'walls', 'doors', 'windows', 'equip', 'measures', 'cables', 'comments', 'customEq'];
+    collections.forEach((key) => {
+      if (!Array.isArray(project[key])) {
+        project[key] = [];
+        note('восстановлены отсутствующие коллекции');
+      }
+    });
+
+    const topologyBefore = JSON.stringify({ verts: project.verts, walls: project.walls });
+    migrateWallTopology(project);
+    normalizeWallConnections(project);
+    const seenVertexIds = new Set();
+    let nextVertexId = project.verts.reduce((max, vertex) => Number.isInteger(vertex.id) ? Math.max(max, vertex.id + 1) : max, 1);
+    project.verts.forEach((vertex) => {
+      if (!Number.isInteger(vertex.id) || vertex.id <= 0 || seenVertexIds.has(vertex.id)) {
+        while (seenVertexIds.has(nextVertexId)) nextVertexId += 1;
+        vertex.id = nextVertexId++;
+      }
+      seenVertexIds.add(vertex.id);
+      vertex.floor = normalizeFloor(vertex.floor);
+    });
+    project.walls.forEach((wall) => {
+      wall.floor = normalizeFloor(wall.floor);
+      syncWallFromVertices(wall, project.verts);
+    });
+    removeUnusedWallVertices(project);
+    project.nextVid = Math.max(1, ...project.verts.map((vertex) => vertex.id + 1));
+    project.nextWallId = Math.max(1, ...project.walls.map((wall) => wall.id + 1));
+    if (topologyBefore !== JSON.stringify({ verts: project.verts, walls: project.walls })) {
+      note('восстановлена топология стен и вершин');
+    }
+    const wallById = new Map(project.walls.map((wall) => [wall.id, wall]));
+
+    const openingOptions = { scale: project.sc, maxDistance: metersToUnits(0.3, project.sc), angleTolerance: 0.35 };
+    ['doors', 'windows'].forEach((collection) => project[collection].forEach((opening) => {
+      const before = JSON.stringify(opening);
+      opening.floor = normalizeFloor(opening.floor);
+      const wall = Number.isInteger(opening.wallId) ? wallById.get(opening.wallId) : null;
+      if (wall) {
+        opening.floor = normalizeFloor(wall.floor);
+        if (!Number.isFinite(opening.wallPosition) || opening.wallPosition < 0 || opening.wallPosition > 1 || ![-1, 1].includes(opening.wallDirection)) {
+          attachOpeningToNearestWall(opening, [wall], { scale: project.sc, maxDistance: 1e8, angleTolerance: Math.PI });
+        }
+        syncOpeningToWall(opening, wall);
+      } else if (opening.wallId != null || opening.wallPosition != null || opening.wallDirection != null) {
+        delete opening.wallId;
+        delete opening.wallPosition;
+        delete opening.wallDirection;
+        attachOpeningToNearestWall(opening, project.walls, openingOptions);
+        const replacement = Number.isInteger(opening.wallId) ? wallById.get(opening.wallId) : null;
+        if (replacement) syncOpeningToWall(opening, replacement);
+      }
+      if (before !== JSON.stringify(opening)) note('восстановлены привязки дверей и окон');
+    }));
+
+    project.equip.forEach((equipment) => {
+      const before = JSON.stringify(equipment);
+      equipment.floor = normalizeFloor(equipment.floor);
+      if (equipmentMountKind(equipment, project.customEq) !== 'wall') {
+        detachEquipmentFromWall(equipment);
+      } else {
+        const wall = Number.isInteger(equipment.wallId) ? wallById.get(equipment.wallId) : null;
+        if (wall) {
+          equipment.floor = normalizeFloor(wall.floor);
+          if (!Number.isFinite(equipment.wallPosition) || equipment.wallPosition < 0 || equipment.wallPosition > 1 || ![-1, 1].includes(equipment.wallSide)) {
+            attachEquipmentToWall(equipment, wall, { snap: false });
+          }
+          syncEquipmentToWall(equipment, wall);
+        } else if (equipment.wallId != null || equipment.wallPosition != null || equipment.wallSide != null) {
+          detachEquipmentFromWall(equipment);
+          attachEquipmentToNearestWall(equipment, project.walls, { scale: project.sc, maxDistance: metersToUnits(0.4, project.sc), snap: true });
+        }
+      }
+      if (before !== JSON.stringify(equipment)) note('восстановлены привязки оборудования');
+    });
+
+    const cablePointsBefore = JSON.stringify(project.cables);
+    syncCableWallReferences(project);
+    project.cables.forEach((cable) => cable.pts.forEach((point) => {
+      if (point.floor == null || !Number.isInteger(point.wallId)) return;
+      const wall = wallById.get(point.wallId);
+      if (wall) point.floor = normalizeFloor(wall.floor);
+    }));
+    if (cablePointsBefore !== JSON.stringify(project.cables)) note('обновлены ссылки кабельных точек на стены');
+
+    const usedObjectIds = new Set();
+    let nextObjectId = [...project.equip, ...project.comments].reduce((max, item) => Number.isInteger(item.id) ? Math.max(max, item.id + 1) : max, 1);
+    [...project.equip, ...project.comments].forEach((item) => {
+      if (!Number.isInteger(item.id) || item.id <= 0 || usedObjectIds.has(item.id)) {
+        while (usedObjectIds.has(nextObjectId)) nextObjectId += 1;
+        item.id = nextObjectId++;
+        note('устранены повторяющиеся идентификаторы объектов');
+      }
+      usedObjectIds.add(item.id);
+    });
+    project.nextId = Math.max(1, ...[...project.equip, ...project.comments].map((item) => item.id + 1));
+
+    const customTypes = new Set();
+    const uniqueDefinitions = project.customEq.filter((definition) => {
+      if (customTypes.has(definition.type)) {
+        note('устранены повторяющиеся определения оборудования');
+        return false;
+      }
+      customTypes.add(definition.type);
+      return true;
+    });
+    project.customEq = uniqueDefinitions;
+    return { repaired: changes.length > 0, changes };
   }
 
   function scaleFields(item, fields, factor) {
@@ -771,6 +1034,28 @@
       }
     });
     return bestIndex;
+  }
+
+  function syncCableWallReferences(project, removedWallId = null) {
+    if (!project || !Array.isArray(project.walls)) return 0;
+    const wallIndexById = new Map(project.walls.map((wall, index) => [wall.id, index]));
+    let updated = 0;
+    (project.cables || []).forEach((cable) => (cable.pts || []).forEach((point) => {
+      const beforeWallId = point.wallId;
+      const beforeWallIndex = point.wallIndex;
+      if (point.wallId === removedWallId || (point.wallId != null && !wallIndexById.has(point.wallId))) {
+        delete point.wallId;
+        delete point.wallIndex;
+      } else if (Number.isInteger(point.wallId) && wallIndexById.has(point.wallId)) {
+        point.wallIndex = wallIndexById.get(point.wallId);
+      } else if (Number.isInteger(point.wallIndex) && project.walls[point.wallIndex]) {
+        point.wallId = project.walls[point.wallIndex].id;
+      } else {
+        delete point.wallIndex;
+      }
+      if (point.wallId !== beforeWallId || point.wallIndex !== beforeWallIndex) updated += 1;
+    }));
+    return updated;
   }
 
   function sharedWallCorner(wallA, wallB, tolerance) {
@@ -929,7 +1214,10 @@
     scenePresetConfig,
     escapeHtml,
     validateProjectData,
+    assertProjectIntegrity,
+    repairProjectIntegrity,
     rescaleProjectGeometry,
+    syncCableWallReferences,
     routeCableSegment,
     cameraMoveVector,
     migrateLegacyDefaults
